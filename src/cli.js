@@ -22,7 +22,7 @@ import { extractInputSchema, formatField } from "./schema.js";
 import { loadModelSchema, mergeModelMeta } from "./schema-cache.js";
 import { runSetup } from "./setup.js";
 
-export const VERSION = "0.2.1";
+export const VERSION = "0.3.0";
 export const CONFIG_PATH = path.join(os.homedir(), ".velsvisual", "config.json");
 
 /** Ошибка использования CLI (exit code 2). */
@@ -738,6 +738,7 @@ async function cmdRun(flags, positionals) {
   const client = makeClient();
   await resolveLocalFiles(client, model, data);
   const taskId = await client.create(model.api, modelId, data);
+  appendHistory({ taskId, model: modelId, api: model.api });
 
   const payload = { taskId, model: modelId, api: model.api };
 
@@ -745,8 +746,8 @@ async function cmdRun(flags, positionals) {
     console.log("Задача создана.");
     console.log(`  taskId: ${taskId}`);
     console.log(`  модель: ${modelId} (api: ${model.api})`);
-    console.log(`Проверить статус:     velsvisual status ${taskId}`);
-    console.log(`Дождаться результата: velsvisual wait ${taskId}`);
+    console.log(`Проверить статус:     kie status ${taskId}  (или velsvisual status)`);
+    console.log(`Дождаться результата: kie wait ${taskId}  (или kie generate wait ${taskId})`);
   };
 
   if (!flags["--wait"]) {
@@ -754,8 +755,8 @@ async function cmdRun(flags, positionals) {
     return 0;
   }
 
-  const timeout = Number(flags["--timeout"] ?? 600);
-  const interval = Number(flags["--interval"] ?? 5);
+  const timeout = parseDuration(flags["--timeout"] ?? flags["--wait-timeout"] ?? 600, 600);
+  const interval = parseDuration(flags["--interval"] ?? flags["--wait-interval"] ?? 5, 5);
   const status = await pollUntilDone(client, model.api, taskId, timeout, interval);
   payload.status = {
     state: status.state,
@@ -793,7 +794,7 @@ async function cmdStatus(flags, positionals) {
 
 async function cmdWait(flags, positionals) {
   const taskId = positionals[0];
-  if (!taskId) throw new UsageError("Укажите taskId: velsvisual wait TASK_ID");
+  if (!taskId) throw new UsageError("Укажите taskId: kie wait TASK_ID  (или kie generate wait TASK_ID)");
   const client = makeClient();
   let api = flags["--api"];
   if (!api) {
@@ -801,8 +802,8 @@ async function cmdWait(flags, positionals) {
     api = detected.api;
     if (!flags["--json"]) console.error(`API: ${api} (определён автоматически)`);
   }
-  const timeout = Number(flags["--timeout"] ?? 600);
-  const interval = Number(flags["--interval"] ?? 5);
+  const timeout = parseDuration(flags["--timeout"] ?? flags["--wait-timeout"] ?? 600, 600);
+  const interval = parseDuration(flags["--interval"] ?? flags["--wait-interval"] ?? 5, 5);
   const status = await pollUntilDone(client, api, taskId, timeout, interval);
   emit(flags, status, () => printStatusHuman(status));
   return 0;
@@ -830,9 +831,10 @@ function cmdConfig(flags) {
 }
 
 // ------------------------------------------------------------------ help
-const HELP = `VelsVisual ${VERSION} — генерация фото/видео/аудио через KIE API (kie.ai).
+const HELP = `kie-media-cli ${VERSION} (alias: velsvisual) — генерация фото/видео/аудио через KIE API (kie.ai).
+Аналог Higgsfield CLI: higgsfield generate create ↔ kie run / kie generate create
 
-Использование: velsvisual <команда> [флаги]
+Использование: kie <команда> [флаги]  (или velsvisual)
 
 Команды:
   setup        мастер первичной настройки (ключ + скилл агента), alias: init
@@ -840,6 +842,7 @@ const HELP = `VelsVisual ${VERSION} — генерация фото/видео/�
   credits      баланс кредитов
   models       реестр моделей (живой каталог docs.kie.ai, кэш 24ч)
                  флаги: --refresh, --category image|video|audio, --search ТЕКСТ
+                 алиасы: --image/--video/--audio (как higgsfield model list --video)
   pricing      цены моделей в кредитах и $ (kie.ai/pricing, кэш 24ч)
                  флаги: --refresh, --category image|video|audio, --search ТЕКСТ
                --search понимает синонимы задач: edit = image-to-image = i2i =
@@ -860,16 +863,193 @@ const HELP = `VelsVisual ${VERSION} — генерация фото/видео/�
                  --no-schema           не подтягивать схему модели из документации
                  --refresh-schema      обновить кэш схемы модели
                  --wait                дождаться результата (polling)
-                 --timeout СЕК         таймаут --wait (по умолч. 600)
-                 --interval СЕК        интервал polling (по умолч. 5)
+                 --timeout СЕК         таймаут --wait (по умолч. 600, понимает 10m/600s)
+                 --interval СЕК        интервал polling (по умолч. 5, понимает 3s)
                  --download КАТАЛОГ    скачать результаты (с --wait)
+  cost МОДЕЛЬ  оценка стоимости без создания задачи (аналог higgsfield generate cost)
+                 флаги как у run (без --wait/--download), + --json
   status ID    статус задачи; без --api — автоперебор: ${CASCADE_ORDER.join(" → ")}
-  wait ID      дождаться завершения задачи (--timeout 600 --interval 5)
+  wait ID      дождаться завершения задачи (--timeout 600 --interval 5, понимает 10m/3s)
   download URL скачать файл (-o ПУТЬ)
   config       сохранить ключ: --set-key KEY
 
+Алиасы Higgsfield (совместимость):
+  model list [--image|--video|--audio] [--json]  → models
+  model get <модель> [--json|--raw]              → schema
+  generate create <модель> [флаги run]           → run
+  generate cost <модель> [флаги]                 → cost
+  generate list [--json]                         → история последних задач
+  generate get <id> [--json]                     → status
+  generate wait <id> [--json]                    → wait
+  workflow list / workflow get <name>            → список воркфлоу KIE
+
+Примеры Higgsfield → KIE:
+  higgsfield model list --video --json        → kie model list --video --json
+  higgsfield generate create nano_banana_2 --prompt "cat" --wait → kie run google/nano-banana --prompt "cat" --wait
+  higgsfield generate cost nano_banana_2 --prompt "cat" → kie cost google/nano-banana --prompt "cat"
+
 Общий флаг: --json — машинный вывод в JSON.
 Ключ API: env KIE_API_KEY или ${CONFIG_PATH}`;
+
+// helpers — парсинг таймаутов как в higgsfield (10m, 3s, 600)
+export function parseDuration(value, fallback) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const s = String(value).trim();
+  const m = s.match(/^(\d+(?:\.\d+)?)(m|s)?$/);
+  if (!m) throw new UsageError(`Неверный формат времени: ${value} (пример: 600, 10m, 30s)`);
+  const n = parseFloat(m[1]);
+  const unit = m[2] || "s";
+  return unit === "m" ? Math.round(n * 60) : Math.round(n);
+}
+
+// ------------------------------------------------------------------ workflows stub (KIE пока без воркфлоу как у Higgsfield)
+const WORKFLOWS = [
+  {
+    name: "image-to-video",
+    description: "Анимация изображения в видео (veo/seedance): --image → видео",
+    params: ["--prompt", "--image", "--set", "--api", "--wait"],
+    example: "kie run veo3_fast --prompt 'кот машет лапой' --image ./cat.png --wait --download ./out",
+  },
+  {
+    name: "image-edit",
+    description: "Редактирование изображения по промпту (nano-banana-edit, flux-kontext)",
+    params: ["--prompt", "--image", "--set", "--wait"],
+    example: "kie run google/nano-banana-edit --prompt 'замени фон на лес' --image ./photo.png --wait",
+  },
+  {
+    name: "upscale",
+    description: "Апскейл изображения (topaz/image-upscale и др.)",
+    params: ["--image", "--set", "--wait"],
+    example: "kie run topaz/image-upscale --image ./photo.png --wait --download ./out",
+  },
+  {
+    name: "text-to-speech",
+    description: "Озвучка текста (elevenlabs, suno TTS)",
+    params: ["--prompt", "--set", "--wait"],
+    example: "kie run elevenlabs/text-to-speech-turbo-2-5 --prompt 'Привет!' --wait --download ./out",
+  },
+];
+
+async function cmdWorkflowList(flags) {
+  const payload = { workflows: WORKFLOWS };
+  const human = () => {
+    console.log("Воркфлоу KIE (паттерны использования моделей):");
+    for (const w of WORKFLOWS) {
+      console.log(`  ${w.name} — ${w.description}`);
+      console.log(`    пример: ${w.example}`);
+    }
+    console.log("\nДетали: kie workflow get <name> --json");
+  };
+  emit(flags, payload, human);
+  return 0;
+}
+
+async function cmdWorkflowGet(flags, positionals) {
+  const name = positionals[0];
+  if (!name) throw new UsageError("Укажите воркфлоу: kie workflow get <name>  (список: kie workflow list)");
+  const wf = WORKFLOWS.find((w) => w.name === name);
+  if (!wf) throw new UsageError(`Неизвестный воркфлоу: ${name}. Список: kie workflow list`);
+  const payload = wf;
+  const human = () => {
+    console.log(`${wf.name} — ${wf.description}`);
+    console.log(`Параметры: ${wf.params.join(", ")}`);
+    console.log(`Пример: ${wf.example}`);
+  };
+  emit(flags, payload, human);
+  return 0;
+}
+
+// history — локальная история задач (аналог higgsfield generate list)
+const HISTORY_PATH = path.join(os.homedir(), ".velsvisual", "history.json");
+const HISTORY_LIMIT = 100;
+function loadHistory() {
+  try {
+    const data = JSON.parse(fs.readFileSync(HISTORY_PATH, "utf8"));
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
+}
+function appendHistory(entry) {
+  try {
+    fs.mkdirSync(path.dirname(HISTORY_PATH), { recursive: true });
+    const list = loadHistory();
+    list.unshift({ ...entry, timestamp: new Date().toISOString() });
+    fs.writeFileSync(HISTORY_PATH, JSON.stringify(list.slice(0, HISTORY_LIMIT), null, 2));
+  } catch {}
+}
+async function cmdHistoryList(flags) {
+  const limit = parseInt(flags["--limit"] || "50", 10);
+  const list = loadHistory().slice(0, limit);
+  const payload = { count: list.length, jobs: list };
+  const human = () => {
+    if (list.length === 0) { console.log("История пуста. Запустите: kie run <модель> --prompt ..."); return; }
+    console.log(`Последние задачи: ${list.length}`);
+    for (const j of list) console.log(`  ${j.taskId}  ${j.model} [${j.api}] ${j.timestamp}`);
+  };
+  emit(flags, payload, human);
+  return 0;
+}
+
+// cost — оценка без создания задачи (аналог higgsfield generate cost)
+async function cmdCost(flags, positionals) {
+  const modelId = positionals[0];
+  if (!modelId) throw new UsageError("Укажите модель: kie cost <модель> [--prompt ...] [--image ...] [--set k=v]");
+  let registry = await loadRegistry({ allowFetch: false, onWarning: warn });
+  if (!registry.models.has(modelId) && !flags["--api"]) {
+    registry = await loadRegistry({ refresh: true, allowFetch: true, onWarning: warn });
+  }
+  const registryEntry = resolveModel(modelId, flags["--api"] || null, registry.models);
+  const model = await withLiveSchema(registryEntry, modelId, flags);
+  const data = buildInput(model, {
+    prompt: flags["--prompt"] ?? null,
+    images: flags["--image"],
+    setPairs: flags["--set"],
+    jsonInputStr: flags["--json-input"],
+  });
+  validateInput(model, data);
+  const pricing = await loadPricing({ allowFetch: true, onWarning: warn, refresh: Boolean(flags["--refresh"]) });
+  // найти точную запись прайса или approximate по описанию
+  let records = pricing.records.filter((r) => r.id === modelId);
+  let approximate = false;
+  if (records.length === 0) {
+    const terms = expandSearchTerms(modelId);
+    records = pricing.records.filter((r) => matchesSearch(terms, r.id, r.description));
+    approximate = records.length > 0;
+  }
+  const pricingInfo = records[0] || null;
+  const payload = {
+    model: modelId,
+    api: model.api,
+    category: model.category,
+    input: data,
+    pricing: pricingInfo ? {
+      credits: pricingInfo.credits,
+      unit: pricingInfo.unit,
+      usd: pricingInfo.usd,
+      approximate,
+      category: pricingInfo.category,
+      description: pricingInfo.description,
+    } : null,
+    pricingSource: pricing.source,
+    fetchedAt: pricing.fetchedAt,
+  };
+  if (!pricingInfo) payload.note = "Цена не найдена в прайсе kie.ai — проверьте: kie pricing --search " + modelId;
+  const human = () => {
+    console.log(`${modelId} [${model.api}/${model.category}]`);
+    if (pricingInfo) {
+      const approx = approximate ? "≈" : "";
+      console.log(`Оценка: ${approx}${pricingInfo.credits} кредитов / ${pricingInfo.unit} (~${formatUsd(pricingInfo.usd)})${approximate ? " (приблизительно по описанию)" : ""}`);
+      if (pricingInfo.description) console.log(`  ${pricingInfo.description}`);
+    } else {
+      console.log("Цена не найдена. Попробуйте: kie pricing --search " + modelId + " --refresh");
+    }
+    console.log(`Источник прайса: ${pricing.source} (${pricing.fetchedAt ? pricing.fetchedAt.slice(0,10) : "—"})`);
+    if (approximate) console.log("≈ — цена подобрана по описанию, не по точному id");
+    console.log("Собраний input:", JSON.stringify(data, null, 2));
+    console.log("Запуск: kie run " + modelId + " --prompt ... --wait (для реального создания задачи)");
+  };
+  emit(flags, payload, human);
+  return 0;
+}
 
 // ------------------------------------------------------------------ dispatch
 const COMMAND_SPECS = {
@@ -877,9 +1057,14 @@ const COMMAND_SPECS = {
   init: { bool: ["--json", "--yes", "--local"], value: ["--repo"], handler: (f) => runSetup(f) },
   credits: { bool: ["--json"], handler: cmdCredits },
   models: {
-    bool: ["--json", "--refresh"],
+    bool: ["--json", "--refresh", "--image", "--video", "--audio"],
     value: ["--category", "--search"],
-    handler: cmdModels,
+    handler: async (flags, pos) => {
+      if (flags["--image"]) flags["--category"] = "image";
+      if (flags["--video"]) flags["--category"] = "video";
+      if (flags["--audio"]) flags["--category"] = "audio";
+      return cmdModels(flags, pos);
+    },
   },
   pricing: {
     bool: ["--json", "--refresh"],
@@ -891,14 +1076,59 @@ const COMMAND_SPECS = {
   upload: { bool: ["--json"], handler: cmdUpload },
   run: {
     bool: ["--json", "--wait", "--no-schema", "--refresh-schema", "--dry-run"],
-    value: ["--prompt", "--json-input", "--api", "--timeout", "--interval", "--download"],
+    value: ["--prompt", "--json-input", "--api", "--timeout", "--interval", "--download", "--wait-timeout", "--wait-interval"],
     multi: ["--image", "--set"],
+    alias: { "--wait-timeout": "--timeout", "--wait-interval": "--interval" },
     handler: cmdRun,
   },
+  cost: {
+    bool: ["--json", "--no-schema", "--refresh-schema", "--refresh"],
+    value: ["--prompt", "--json-input", "--api"],
+    multi: ["--image", "--set"],
+    handler: cmdCost,
+  },
   status: { bool: ["--json"], value: ["--api"], handler: cmdStatus },
-  wait: { bool: ["--json"], value: ["--api", "--timeout", "--interval"], handler: cmdWait },
+  wait: {
+    bool: ["--json"],
+    value: ["--api", "--timeout", "--interval", "--wait-timeout", "--wait-interval"],
+    alias: { "--wait-timeout": "--timeout", "--wait-interval": "--interval" },
+    handler: cmdWait,
+  },
   download: { bool: ["--json"], value: ["--output"], alias: { "-o": "--output" }, handler: cmdDownload },
   config: { bool: ["--json"], value: ["--set-key"], handler: cmdConfig },
+  workflow: {
+    bool: ["--json"],
+    handler: async (flags, pos) => {
+      const sub = pos[0];
+      if (!sub || sub === "list") return cmdWorkflowList(flags);
+      if (sub === "get") return cmdWorkflowGet(flags, pos.slice(1));
+      throw new UsageError(`workflow: неизвестная подкоманда ${JSON.stringify(sub)} (list|get)`);
+    },
+  },
+  model: {
+    bool: ["--json", "--refresh", "--image", "--video", "--audio"],
+    value: ["--category", "--search"],
+    handler: async (flags, pos) => {
+      const sub = pos[0];
+      if (!sub || sub === "list") {
+        if (flags["--image"]) flags["--category"] = "image";
+        if (flags["--video"]) flags["--category"] = "video";
+        if (flags["--audio"]) flags["--category"] = "audio";
+        if (pos[0] === "list") pos = pos.slice(1);
+        return cmdModels(flags, pos);
+      }
+      if (sub === "get") return cmdSchema(flags, pos.slice(1));
+      throw new UsageError(`model: используйте model list | model get <модель>`);
+    },
+  },
+  generate: {
+    bool: ["--json"],
+    value: [],
+    handler: async (flags, pos) => {
+      // этот handler не используется напрямую — логика в main() для поддержки флагов подкоманд
+      throw new UsageError("generate: используйте generate create|cost|list|get|wait|workflow");
+    },
+  },
 };
 
 export async function main(argv = process.argv.slice(2)) {
@@ -906,11 +1136,99 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(HELP);
     return 0;
   }
-  if (argv[0] === "--version") {
-    console.log(`velsvisual ${VERSION}`);
+  if (argv[0] === "--version" || argv[0] === "-v") {
+    console.log(`kie-media-cli ${VERSION} (alias: velsvisual ${VERSION})`);
     return 0;
   }
   const [command, ...rest] = argv;
+
+  // --- Higgsfield-совместимые иерархические команды (generate/model) ---
+  // Они требуют проброса флагов подкоманд, поэтому парсим вручную, не через COMMAND_SPECS
+  if (command === "generate") {
+    try {
+      const sub = rest[0];
+      const subRest = rest.slice(1);
+      if (!sub) throw new UsageError("generate: укажите подкоманду create|cost|list|get|wait|workflow");
+      if (sub === "create") {
+        const spec = COMMAND_SPECS.run;
+        const { flags, positionals } = parseArgs(subRest, spec);
+        return (await cmdRun(flags, positionals)) || 0;
+      }
+      if (sub === "cost") {
+        const spec = COMMAND_SPECS.cost;
+        const { flags, positionals } = parseArgs(subRest, spec);
+        return (await cmdCost(flags, positionals)) || 0;
+      }
+      if (sub === "list") {
+        const spec = { bool: ["--json"], value: ["--limit"] };
+        const { flags } = parseArgs(subRest, spec);
+        return (await cmdHistoryList(flags)) || 0;
+      }
+      if (sub === "get") {
+        const spec = { bool: ["--json"], value: ["--api"] };
+        const { flags, positionals } = parseArgs(subRest, spec);
+        return (await cmdStatus(flags, positionals)) || 0;
+      }
+      if (sub === "wait") {
+        const spec = { bool: ["--json"], value: ["--api", "--timeout", "--interval", "--wait-timeout", "--wait-interval"], alias: { "--wait-timeout": "--timeout", "--wait-interval": "--interval" } };
+        const { flags, positionals } = parseArgs(subRest, spec);
+        if (flags["--timeout"] !== undefined) flags["--timeout"] = String(parseDuration(flags["--timeout"], 600));
+        if (flags["--interval"] !== undefined) flags["--interval"] = String(parseDuration(flags["--interval"], 5));
+        return (await cmdWait(flags, positionals)) || 0;
+      }
+      if (sub === "workflow") {
+        const wf = subRest[0];
+        const wfRest = subRest.slice(1);
+        if (!wf || wf === "list") {
+          const spec = { bool: ["--json"] };
+          const { flags } = parseArgs(wfRest, spec);
+          return (await cmdWorkflowList(flags)) || 0;
+        }
+        if (wf === "get") {
+          const spec = { bool: ["--json"] };
+          const { flags } = parseArgs(wfRest.slice(1), spec);
+          return (await cmdWorkflowGet(flags, [wfRest[0]])) || 0;
+        }
+        throw new UsageError(`generate workflow: неизвестный воркфлоу ${JSON.stringify(wf)} (попробуйте: kie workflow list)`);
+      }
+      throw new UsageError(`generate: неизвестная подкоманда ${JSON.stringify(sub)} (create|cost|list|get|wait|workflow)`);
+    } catch (exc) {
+      if (exc instanceof UsageError) { console.error(`Ошибка: ${exc.message}`); return 2; }
+      if (exc instanceof TaskNotFound) { console.error(`Задача не найдена: ${exc.msg}`); return 1; }
+      if (exc instanceof KieError) { console.error(exc.message); return 1; }
+      throw exc;
+    }
+  }
+
+  if (command === "model") {
+    try {
+      const sub = rest[0];
+      const subRest = rest.slice(1);
+      if (!sub || sub === "list") {
+        const spec = { bool: ["--json", "--refresh", "--image", "--video", "--audio"], value: ["--category", "--search"] };
+        const { flags } = parseArgs(subRest, spec);
+        if (flags["--image"]) flags["--category"] = "image";
+        if (flags["--video"]) flags["--category"] = "video";
+        if (flags["--audio"]) flags["--category"] = "audio";
+        return (await cmdModels(flags, [])) || 0;
+      }
+      if (sub === "get") {
+        const spec = { bool: ["--json", "--raw"] };
+        const { flags, positionals } = parseArgs(subRest, spec);
+        // model get <id> → schema <id>
+        if (positionals.length === 0) throw new UsageError("Укажите модель: kie model get <модель>");
+        // переиспользуем cmdSchema: positionals[0] = modelId
+        return (await cmdSchema(flags, positionals)) || 0;
+      }
+      throw new UsageError(`model: используйте model list | model get <модель>`);
+    } catch (exc) {
+      if (exc instanceof UsageError) { console.error(`Ошибка: ${exc.message}`); return 2; }
+      if (exc instanceof TaskNotFound) { console.error(`Задача не найдена: ${exc.msg}`); return 1; }
+      if (exc instanceof KieError) { console.error(exc.message); return 1; }
+      throw exc;
+    }
+  }
+
   const spec = COMMAND_SPECS[command];
   if (!spec) {
     console.error(`Ошибка: неизвестная команда: ${command}\n`);
