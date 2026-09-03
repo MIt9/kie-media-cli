@@ -1,185 +1,214 @@
 ```
-__     _______ _     ____   __     _____ ____  _   _   _    _
-\ \   / / ____| |   / ___|  \ \   / /_ _/ ___|| | | | / \  | |
- \ \ / /|  _| | |   \___ \   \ \ / / | |\___ \| | | |/ _ \ | |
-  \ V / | |___| |___ ___) |   \ V /  | | ___) | |_| / ___ \| |___
-   \_/  |_____|_____|____/     \_/  |___|____/ \___/_/   \_\_____|
+ _  _____ _____   __  __ _____ ____ ___    _     ____ _     ___
+| |/ /_ _| ____| |  \/  | ____|  _ \_ _|  / \   / ___| |   |_ _|
+| ' / | ||  _|   | |\/| |  _| | | | | |  / _ \ | |   | |    | |
+| . \ | || |___  | |  | | |___| |_| | | / ___ \| |___| |___ | |
+|_|\_\___|_____| |_|  |_|_____|____/___/_/   \_\____|_____|___|
 ```
 
-# VelsVisual
+# KIE Media CLI (`kie`)
 
-[![npm](https://img.shields.io/npm/v/velsvisual.svg)](https://www.npmjs.com/package/velsvisual)
-[![CI](https://github.com/nick-vels/VelsVisual/actions/workflows/ci.yml/badge.svg)](https://github.com/nick-vels/VelsVisual/actions/workflows/ci.yml)
-[![node](https://img.shields.io/node/v/velsvisual.svg)](https://nodejs.org)
-[![license](https://img.shields.io/npm/l/velsvisual.svg)](LICENSE)
+[![npm](https://img.shields.io/npm/v/kie-media-cli.svg)](https://www.npmjs.com/package/kie-media-cli)
+[![node](https://img.shields.io/node/v/kie-media-cli.svg)](https://nodejs.org)
+[![license](https://img.shields.io/npm/l/kie-media-cli.svg)](LICENSE)
 
-CLI на Node.js для генерации **фото, видео и аудио** через [KIE API](https://kie.ai) (docs.kie.ai).
-Один инструмент поверх всех API платформы: универсальный Market API (jobs), Seedance,
-GPT Image, Wan, Suno, ElevenLabs и десятки других моделей.
-**Ноль runtime-зависимостей** — только Node.js >= 18.
+A Node.js CLI tool for generating **photos, videos, and audio** via [KIE API](https://kie.ai) ([docs.kie.ai](https://docs.kie.ai)).
 
-## Установка и онбординг — одной командой
+A single unified interface over all KIE platform APIs: universal Market API (jobs), Seedance, GPT Image, Wan, Suno, ElevenLabs, and dozens of other models.
+
+**Zero runtime dependencies** — requires only Node.js >= 18.
+
+---
+
+## 🚀 Quick Start & Setup
+
+The executable command is **`kie`**:
 
 ```bash
-npx -y velsvisual setup
+npx -y kie-media-cli setup
 ```
 
-`npx` скачает CLI и сразу запустит мастер настройки (см. ниже). Для постоянной
-установки: `npm i -g velsvisual`. Альтернативы — прямо из GitHub
-(`npm i -g github:nick-vels/VelsVisual`) или из локальных исходников
-(`npm install -g .` в корне репозитория). Если пакет уже установлен — мастер
-доступен как `velsvisual setup` (alias: `init`).
+The interactive setup wizard guides you through two steps:
 
-Мастер проведёт по шагам:
+1. **KIE API Key** — detects `KIE_API_KEY` from environment or prompts for it, verifies account credit balance via API, and saves to `~/.kie-media/config.json` (chmod 600).
+2. **AI Agent Skill** — installs the `kie-generate` skill via `npx -y skills add MIt9/kie-skills/kie-generate`.
 
-1. **API-ключ** — предложит взять `KIE_API_KEY` из окружения или ввести вручную
-   (ключ выдаётся на https://kie.ai/api-key), проверит его запросом баланса
-   и сохранит в `~/.velsvisual/config.json` (chmod 600).
-2. **Скилл для агента** — установит скилл `visual` командой
-   `npx -y skills add nick-vels/VelsVisual` или скопирует его из пакета
-   локально (`velsvisual setup --local`). Другой источник — флаг
-   `velsvisual setup --repo владелец/репозиторий`.
-3. Покажет сводку и пример первой генерации.
+---
 
-Неинтерактивный режим: `velsvisual setup --yes` (берёт ключ из env).
-Без мастера: `export KIE_API_KEY=ваш_ключ` или `velsvisual config --set-key ваш_ключ`.
+## 🔑 Setting the API Key
 
-## Обновление
+Get your API key at [https://kie.ai/api-key](https://kie.ai/api-key).
 
+You can configure the key using any of the following 3 options:
+
+1. **Interactive Setup Wizard** (prompts for key, verifies balance, installs agent skill):
+   ```bash
+   kie setup
+   ```
+2. **Direct CLI Configuration** (saves to `~/.kie-media/config.json`):
+   ```bash
+   kie config --set-key YOUR_API_KEY
+   ```
+3. **Environment Variable** (ideal for CI/CD or `.env`):
+   ```bash
+   export KIE_API_KEY=YOUR_API_KEY
+   ```
+
+Verify your key and credit balance at any time:
 ```bash
-npm i -g velsvisual@latest     # обновить CLI (если установлен глобально)
-npx -y skills update visual    # обновить скилл агента (alias: upgrade)
-velsvisual --version           # проверить версию
+kie credits
 ```
 
-- Через `npx -y velsvisual ...` версия всегда свежая — обновлять нечего.
-- Из GitHub (свежий main до публикации релиза): `npm i -g github:nick-vels/VelsVisual`.
-- Из локальных исходников: `git pull && npm install -g .` в корне репозитория.
-- Скилл можно и переустановить поверх: `npx -y skills add nick-vels/VelsVisual`.
-  Восстановить ровно те версии, что записаны в `skills-lock.json`:
-  `npx -y skills experimental_install`.
-- **Каталог моделей и схемы обновлять вручную не нужно** — они живые и не зависят
-  от версии CLI (кэш 24ч). Принудительно: `velsvisual models --refresh`
-  и `velsvisual run ... --refresh-schema`.
+---
 
-## Примеры
+## 📦 Installation Options
+
+- **Global via npm**: `npm i -g kie-media-cli`
+- **From local source**: `npm install -g .` in the root repository folder
+
+Non-interactive setup for CI/CD: `kie setup --yes` (reads key from `KIE_API_KEY`).
+
+---
+
+## 💻 Usage Examples
 
 ```bash
-# Картинка (text-to-image) — создать задачу, дождаться, скачать в ./out
-velsvisual run google/nano-banana --prompt "рыжий кот в скафандре, кинематографично" \
+# 1. Text-to-Image — create task, wait for completion, download to ./out
+kie run google/nano-banana --prompt "red cat in a spacesuit, cinematic" \
   --wait --download ./out
 
-# Видео из картинки: локальный файл будет сначала загружен через upload API
-velsvisual run veo3_fast --prompt "кот машет лапой" --image ./cat.png \
-  --set aspect_ratio=16:9 --wait --timeout 900 --download ./out
+# 2. Image-to-Video — local image is automatically uploaded first
+kie run veo3_fast --prompt "cat waving hand" --image ./cat.png \
+  --set aspect_ratio=16:9 --wait --timeout 10m --download ./out
 
-# Музыка (Suno, custom mode)
-velsvisual run suno --prompt "песня про осенний город" \
-  --set customMode=true --set style="indie rock, female vocal" --set title="Осень" \
+# 3. Music (Suno, custom mode)
+kie run suno --prompt "song about autumn city" \
+  --set customMode=true --set style="indie rock, female vocal" --set title="Autumn" \
   --wait --download ./out
 
-# Озвучка (ElevenLabs TTS)
-velsvisual run elevenlabs/text-to-speech-turbo-2-5 \
-  --prompt "Привет! Это тестовая озвучка." --wait --download ./out
+# 4. Text-to-Speech (ElevenLabs TTS)
+kie run elevenlabs/text-to-speech-turbo-2-5 \
+  --prompt "Hello! This is a test voiceover." --wait --download ./out
 
-# Апскейл изображения
-velsvisual run topaz/image-upscale --image ./photo.png --wait --download ./out
+# 5. Image Upscale
+kie run topaz/image-upscale --image ./photo.png --wait --download ./out
+
+# 6. Cost Estimation — check price without spending credits
+kie cost google/nano-banana --prompt "red cat"
 ```
 
-Без `--wait` команда `run` сразу печатает `taskId`; дальше — асинхронный паттерн:
+### Asynchronous Pattern (without `--wait`)
+
+If you call `run` without the `--wait` flag, the command immediately returns a `taskId`:
 
 ```bash
-velsvisual status <taskId>     # статус (API определяется автоматически)
-velsvisual wait <taskId>       # блокирующее ожидание, печатает resultUrls
-velsvisual download <URL> -o file.png
+kie run google/nano-banana --prompt "cat"          # Returns taskId
+kie status <taskId>                                # Check task status
+kie wait <taskId> --timeout 10m                    # Blocking wait until completed
+kie download <URL> -o result.png                    # Download result file
 ```
 
-URL результатов живут ограниченное время (~24 часа) — скачивайте сразу
-(`--download КАТАЛОГ` вместе с `--wait`).
+*Note: Result URLs expire after ~24 hours, so downloading immediately is recommended.*
 
-## Реестр моделей обновляется сам
+---
 
-Модели на kie.ai выходят каждую неделю, поэтому каталог не зашит в код:
+## 🔄 Live Model Registry & Dynamic Schemas
 
-- `velsvisual models` — показывает **живой реестр**: CLI скачивает каталог
-  с https://docs.kie.ai/llms.txt и market-страницы документации.
-- Кэш — `~/.velsvisual/models-cache.json`, авто-обновление раз в 24 часа;
-  принудительно — `velsvisual models --refresh`.
-- Если сети нет: свежий кэш → старый кэш → встроенный seed-реестр.
-  Источник (`live`/`cache`/`seed`) и дата указываются в выводе.
-- Метаданные seed-моделей (обязательные поля, тип API) всегда приоритетны;
-  новые модели из каталога просто добавляются. Seed-модели, пропавшие из
-  живого каталога, помечаются `[stale]` — они могли быть переименованы.
-  Модели выделенных API (`suno`, `veo3*`, `flux-kontext-*`, `gpt4o-image`,
-  `runway-gen3`) живут вне market-каталога и `[stale]` не помечаются.
+New models are released frequently on KIE API. The CLI fetches the catalog dynamically:
 
-## Новые модели работают без обновления CLI
+- **Live Model Registry**: `kie models` fetches the live catalog from `docs.kie.ai` and caches it for 24 hours (`~/.kie-media/models-cache.json`). Force refresh: `kie models --refresh`.
+- **Offline Fallback**: Fresh cache → Stale cache → Built-in seed registry.
+- **Dynamic Input Schemas**: Before launching, `kie run` pulls the input schema from documentation to validate required parameters pre-flight.
+- **Inspect Model Schema**:
+  ```bash
+  kie schema bytedance/seedance-2-mini          # Parameter table, types, enums, defaults
+  kie schema bytedance/seedance-2-mini --raw    # Raw OpenAPI YAML
+  ```
+- **Recommend Best Models**:
+  ```bash
+  kie recommend image                           # Popular image models with pricing
+  kie recommend video                           # Popular video models
+  ```
 
-`run` перед запуском читает схему модели из её документации (кэш
-`~/.velsvisual/schema-cache.json`, TTL 24ч) и выводит из неё:
+---
 
-- куда положить `--prompt` (`prompt`, `text`, …) и `--image`
-  (`image_url`, `image_urls`, `input_urls`, `first_frame_url`, `image`, …);
-- какие поля обязательны — проверка происходит до сетевого запроса;
-- обязательные поля, у которых есть значение по умолчанию, подставляются сами
-  (иначе API отвечает 422 на, казалось бы, корректный запрос).
-
-Поэтому модель, вышедшая на kie.ai вчера, вызывается обычным
-`velsvisual run <новая-модель> --prompt ... --image ...`. Если модели нет
-в кэше реестра, `run` обновит каталог сам. Флаги: `--no-schema` (не ходить
-за схемой), `--refresh-schema` (обновить кэш), `--dry-run` (показать итоговый
-запрос и ничего не отправлять).
-
-Поля модели можно посмотреть напрямую:
+## 📊 Pricing & Credit Tracking
 
 ```bash
-velsvisual schema bytedance/seedance-2-mini          # таблица полей, enum, дефолты
-velsvisual schema bytedance/seedance-2-mini --raw    # плюс сырой YAML схемы
+kie credits                                     # Account credit balance
+kie pricing --category video                    # Live model pricing in credits and USD
+kie pricing --search "edit"                     # Search pricing by task or synonyms
 ```
 
-Соответствие встроенного seed-реестра живым схемам проверяется скриптом
-`npm run audit:registry` (ненулевой exit code, если что-то разошлось).
+---
 
-## Команды
+## 🛠 Complete Command Reference
 
-| Команда                                                                                                                                                           | Назначение                                                                                   |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `velsvisual setup [--yes] [--local] [--repo РЕПО]`                                                                                                               | мастер настройки (ключ + скилл агента)                                   |
-| `velsvisual credits`                                                                                                                                                 | баланс кредитов                                                                          |
-| `velsvisual models [--refresh] [--category image\|video\|audio] [--search ТЕКСТ]`                                                                                 | живой реестр моделей (`--search` с синонимами: `edit` = `image-to-image` = `remix`)  |
-| `velsvisual recommend image\|video\|audio [--refresh]`                                                                                                          | подбор модели: последние версии популярных семейств с ценами и тиром качества        |
-| `velsvisual pricing [--refresh] [--category image\|video\|audio] [--search ТЕКСТ]`                                                                              | цены моделей в кредитах и $ (живой прайс kie.ai, кэш 24ч)                            |
-| `velsvisual schema МОДЕЛЬ [--raw]`                                                                                                                             | поля input модели из её документации                                         |
-| `velsvisual upload ФАЙЛ`                                                                                                                                         | загрузка локального файла →`fileUrl`                                         |
-| `velsvisual run МОДЕЛЬ [--prompt] [--image ...] [--set k=v ...] [--json-input JSON] [--dry-run] [--wait] [--timeout] [--interval] [--download КАТАЛОГ]` | создание задачи генерации                                                       |
-| `velsvisual status TASK_ID [--api ...]`                                                                                                                              | статус; без`--api` — автоперебор jobs → veo → suno → gpt4o → flux → runway |
-| `velsvisual wait TASK_ID [--timeout 600] [--interval 5] [--api ...]`                                                                                                 | polling до success/fail                                                                              |
-| `velsvisual download URL [-o ПУТЬ]`                                                                                                                              | скачать файл                                                                                |
-| `velsvisual config --set-key KEY`                                                                                                                                    | сохранить API-ключ                                                                        |
+| Command | Description |
+| :--- | :--- |
+| `kie setup [--yes] [--local] [--repo REPO]` | Interactive setup wizard (API key + agent skill) |
+| `kie credits` | Display account credit balance |
+| `kie models [--refresh] [--category image\|video\|audio] [--search TEXT]` | Live model registry from docs.kie.ai |
+| `kie recommend image\|video\|audio [--refresh]` | Recommended models by category & quality/price tier |
+| `kie pricing [--refresh] [--category image\|video\|audio] [--search TEXT]` | Live model pricing in credits and USD |
+| `kie schema MODEL [--raw]` | Inspect model input schema from documentation |
+| `kie upload FILE` | Upload local file to KIE storage → returns `fileUrl` |
+| `kie run MODEL [--prompt ...] [--image ...] [--set k=v ...] [--wait] [--download DIR]` | Create generation task |
+| `kie cost MODEL [--prompt ...] [--image ...] [--set k=v ...]` | Estimate cost without creating task |
+| `kie status TASK_ID [--api ...]` | Check task status |
+| `kie wait TASK_ID [--timeout 10m] [--interval 5s]` | Wait for task completion (polling) |
+| `kie download URL [-o PATH]` | Download generated asset |
+| `kie config --set-key KEY` | Save API key to configuration file |
 
-Общий флаг `--json` — машинный вывод JSON. При ошибке API — ненулевой exit code
-и сообщение с `code`/`msg` (401 ключ, 402 кредиты, 422 валидация, 429 rate limit,
-451 входное изображение, 455 maintenance, 501 генерация не удалась).
+### Hierarchical Command Syntax
+The CLI also supports subcommand aliases:
+- `kie generate create ...` ↔ `kie run ...`
+- `kie generate cost ...` ↔ `kie cost ...`
+- `kie generate list` ↔ View local task history
+- `kie generate get <id>` ↔ `kie status <id>`
+- `kie generate wait <id>` ↔ `kie wait <id>`
+- `kie model list` ↔ `kie models`
+- `kie model get <model>` ↔ `kie schema <model>`
 
-## Скилл для агента
+### Helpful Flags
+- `--json` — Machine-readable JSON output for all commands.
+- `--dry-run` — For `run`/`cost`: inspect payload without making network requests or spending credits.
+- `--timeout 10m` / `--interval 3s` — Duration parsing support (`m` for minutes, `s` for seconds).
 
-Готовый скилл с инструкцией по работе с CLI: [`skills/visual/SKILL.md`](skills/visual/SKILL.md)
-(входит в пакет). Установка и обновление:
+---
+
+## 🤖 Skills for AI Agents (`MIt9/kie-skills`)
+
+A suite of skills for autonomous AI agents (Claude Code, Cursor, Codex, Antigravity) is available in [MIt9/kie-skills](https://github.com/MIt9/kie-skills):
+
+- **`kie-generate`** — Image, video, and audio generation via KIE API (`kie run`, `kie models`, `kie cost`).
+- **`kie-brandkit`** — Brand identity, palette, logo, mockup, and brandbook generation.
+- **`kie-product-photoshoot`** — Studio and lifestyle product visuals.
+
+### Installing Skills
 
 ```bash
-velsvisual setup                          # мастер: ключ + скилл
-npx -y skills add nick-vels/VelsVisual    # только скилл
-npx -y skills update visual               # обновить установленный скилл
-velsvisual setup --local                  # скопировать скилл из пакета в ./.agents/skills
+# Core generation skill:
+npx -y skills add MIt9/kie-skills/kie-generate
+
+# Design & product skills:
+npx -y skills add MIt9/kie-skills/kie-brandkit
+npx -y skills add MIt9/kie-skills/kie-product-photoshoot
 ```
 
-Каталог моделей в скилл намеренно не зашит: актуальный список агент каждый раз
-получает из живого реестра (`velsvisual models --refresh`), а поля конкретной
-модели — из `velsvisual schema МОДЕЛЬ`.
+---
 
-## Тесты
+## 🧪 Testing
+
+Run built-in test runner (offline, zero network calls):
 
 ```bash
-npm test              # node:test, без сети
-npm run audit:registry # сверка seed-реестра с живыми схемами docs.kie.ai (нужна сеть)
+npm test              # node:test
+npm run audit:registry # Audit seed registry against live docs.kie.ai schemas
 ```
+
+---
+
+## 📄 License
+
+MIT © kie-media-cli

@@ -1,5 +1,5 @@
 /**
- * VelsVisual — CLI для генерации фото/видео/аудио через KIE API (kie.ai).
+ * KIE Media CLI — инструмент для генерации фото/видео/аудио через KIE API (kie.ai).
  * Парсер аргументов — hand-rolled, ноль зависимостей.
  */
 
@@ -23,7 +23,7 @@ import { loadModelSchema, mergeModelMeta } from "./schema-cache.js";
 import { runSetup } from "./setup.js";
 
 export const VERSION = "0.3.0";
-export const CONFIG_PATH = path.join(os.homedir(), ".velsvisual", "config.json");
+export const CONFIG_PATH = path.join(os.homedir(), ".kie-media", "config.json");
 
 /** Ошибка использования CLI (exit code 2). */
 export class UsageError extends Error {
@@ -168,7 +168,7 @@ export function resolveModel(modelId, apiOverride = null, registryModels = null)
   if (apiOverride) return { ...GENERIC_MODEL, api: apiOverride, id: modelId };
   throw new UsageError(
     `Неизвестная модель: ${JSON.stringify(modelId)}.\n` +
-      "Список моделей: velsvisual models\n" +
+      "Список моделей: kie models\n" +
       "Для модели вне реестра укажите тип API: --api jobs|veo|runway|gpt4o|flux|suno"
   );
 }
@@ -195,7 +195,7 @@ export function buildInput(model, { prompt = null, images = null, setPairs = nul
       // (image_url / image_urls / first_frame_url / …) смотрим в схеме модели.
       throw new UsageError(
         `Для модели ${model.id || ""} не известно поле изображения, флаг --image не подходит.\n` +
-          `Посмотрите схему:  velsvisual schema ${model.id || "МОДЕЛЬ"}\n` +
+          `Посмотрите схему:  kie schema ${model.id || "МОДЕЛЬ"}\n` +
           "и передайте файл или URL в нужное поле: --set ПОЛЕ=ПУТЬ_ИЛИ_URL\n" +
           "(локальный файл в любом поле CLI загрузит автоматически)"
       );
@@ -250,7 +250,7 @@ export function validateInput(model, data) {
       return `  - ${field} (задайте через ${hint})`;
     });
     const tail = model.id
-      ? `\nВсе поля модели: velsvisual schema ${model.id}`
+      ? `\nВсе поля модели: kie schema ${model.id}`
       : "";
     throw new UsageError("Не заполнены обязательные поля модели:\n" + lines.join("\n") + tail);
   }
@@ -318,7 +318,7 @@ export async function resolveLocalFiles(client, model, data, log = console.error
   }
 }
 
-/** KIE_API_KEY из env, иначе ~/.velsvisual/config.json. */
+/** KIE_API_KEY из env, иначе ~/.kie/config.json. */
 export function getApiKey() {
   const envKey = (process.env.KIE_API_KEY || "").trim();
   if (envKey) return envKey;
@@ -343,8 +343,8 @@ function makeClient() {
     throw new UsageError(
       "Не найден API-ключ KIE.\n" +
         "  1) Установите переменную окружения: export KIE_API_KEY=ваш_ключ\n" +
-        "  2) Или сохраните ключ: velsvisual config --set-key ваш_ключ\n" +
-        "  3) Или пройдите мастер настройки: velsvisual setup\n" +
+        "  2) Или сохраните ключ: kie config --set-key ваш_ключ\n" +
+        "  3) Или пройдите мастер настройки: kie setup\n" +
         "Ключ выдаётся в кабинете https://kie.ai"
     );
   }
@@ -380,7 +380,7 @@ async function pollUntilDone(client, api, taskId, timeoutSec, intervalSec) {
     if (Date.now() >= deadline) {
       throw new KieError(
         `таймаут ожидания (${timeoutSec} сек). Задача ещё выполняется — ` +
-          `проверьте позже: velsvisual wait ${taskId}`
+          `проверьте позже: kie wait ${taskId}`
       );
     }
     await new Promise((r) => setTimeout(r, intervalSec * 1000));
@@ -497,7 +497,7 @@ async function cmdModels(flags) {
       const stale = m.stale ? "  [stale: нет в живом каталоге]" : "";
       console.log(`${id}  [${m.category}/${m.api}]  обязательные: ${required}${stale}`);
       if (m.description) console.log(`    ${m.description}`);
-      if (m.docUrl) console.log(`    схема input: velsvisual schema ${id}  (${m.docUrl})`);
+      if (m.docUrl) console.log(`    схема input: kie schema ${id}  (${m.docUrl})`);
     }
   };
   emit(flags, payload, human);
@@ -543,7 +543,7 @@ async function cmdPricing(flags) {
     const date = pricing.fetchedAt ? pricing.fetchedAt.slice(0, 10) : "—";
     console.log(`Источник: ${pricing.source} (прайс от ${date}), записей: ${records.length}`);
     if (records.length === 0) {
-      console.log("Записи не найдены. Попробуйте: velsvisual pricing --refresh");
+      console.log("Записи не найдены. Попробуйте: kie pricing --refresh");
       return;
     }
     for (const r of records) {
@@ -564,7 +564,7 @@ const TIER_LABELS = {
 async function cmdRecommend(flags, positionals) {
   const category = positionals[0];
   if (!category || !CATEGORIES.includes(category)) {
-    throw new UsageError(`Укажите категорию: velsvisual recommend ${CATEGORIES.join("|")}`);
+    throw new UsageError(`Укажите категорию: kie recommend ${CATEGORIES.join("|")}`);
   }
   const registry = await loadRegistry({
     refresh: Boolean(flags["--refresh"]),
@@ -585,7 +585,7 @@ async function cmdRecommend(flags, positionals) {
   };
   const human = () => {
     if (options.length === 0) {
-      console.log(`Моделей категории ${category} не найдено. Обновите каталог: velsvisual models --refresh`);
+      console.log(`Моделей категории ${category} не найдено. Обновите каталог: kie models --refresh`);
       return;
     }
     console.log(`Рекомендуемые модели (${category}) — последняя версия каждого популярного семейства:`);
@@ -595,7 +595,7 @@ async function cmdRecommend(flags, positionals) {
       console.log(`   ${formatPriceRange(option.pricing)}`);
       if (option.description) console.log(`   ${option.description}`);
     });
-    console.log("\nЗапуск: velsvisual run МОДЕЛЬ --prompt ... --wait --download ./out --json");
+    console.log("\nЗапуск: kie run МОДЕЛЬ --prompt ... --wait --download ./out --json");
   };
   emit(flags, payload, human);
   return 0;
@@ -619,7 +619,7 @@ async function withLiveSchema(model, modelId, flags) {
     if (model.dynamic || !model.docUrl) {
       warn(
         `схема модели ${modelId} недоступна — поля не проверены. ` +
-          "Если API вернёт 422, сверьтесь с документацией: velsvisual schema " + modelId
+          "Если API вернёт 422, сверьтесь с документацией: kie schema " + modelId
       );
     }
     return model;
@@ -629,13 +629,13 @@ async function withLiveSchema(model, modelId, flags) {
 
 async function cmdSchema(flags, positionals) {
   const modelId = positionals[0];
-  if (!modelId) throw new UsageError("Укажите модель: velsvisual schema МОДЕЛЬ");
+  if (!modelId) throw new UsageError("Укажите модель: kie schema МОДЕЛЬ");
   const registry = await loadRegistry({ allowFetch: true, onWarning: warn });
   const entry = registry.models.get(modelId);
   if (!entry) {
     throw new UsageError(
       `Неизвестная модель: ${JSON.stringify(modelId)}.\n` +
-        `Поиск: velsvisual models --search ${modelId.split("/").pop()}`
+        `Поиск: kie models --search ${modelId.split("/").pop()}`
     );
   }
   const docUrl = entry.docUrl || null;
@@ -643,7 +643,7 @@ async function cmdSchema(flags, positionals) {
     throw new UsageError(
       `Для модели ${modelId} нет страницы в живом каталоге docs.kie.ai` +
         (entry.stale ? " (модель помечена stale — вероятно, снята с публикации)." : ".") +
-        "\nОбновите каталог: velsvisual models --refresh"
+        "\nОбновите каталог: kie models --refresh"
     );
   }
 
@@ -687,7 +687,7 @@ async function cmdSchema(flags, positionals) {
 
 async function cmdUpload(flags, positionals) {
   const file = positionals[0];
-  if (!file) throw new UsageError("Укажите файл: velsvisual upload ФАЙЛ");
+  if (!file) throw new UsageError("Укажите файл: kie upload ФАЙЛ");
   if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
     throw new UsageError(`Файл не найден: ${file}`);
   }
@@ -699,7 +699,7 @@ async function cmdUpload(flags, positionals) {
 
 async function cmdRun(flags, positionals) {
   const modelId = positionals[0];
-  if (!modelId) throw new UsageError("Укажите модель: velsvisual run МОДЕЛЬ [--prompt ...]");
+  if (!modelId) throw new UsageError("Укажите модель: kie run МОДЕЛЬ [--prompt ...]");
   // Без сети на каждый запуск: только кэш/seed (allowFetch: false).
   let registry = await loadRegistry({ allowFetch: false, onWarning: warn });
   // Модели нет в кэше — возможно, она появилась в каталоге только что: обновляемся.
@@ -746,7 +746,7 @@ async function cmdRun(flags, positionals) {
     console.log("Задача создана.");
     console.log(`  taskId: ${taskId}`);
     console.log(`  модель: ${modelId} (api: ${model.api})`);
-    console.log(`Проверить статус:     kie status ${taskId}  (или velsvisual status)`);
+    console.log(`Проверить статус:     kie status ${taskId}`);
     console.log(`Дождаться результата: kie wait ${taskId}  (или kie generate wait ${taskId})`);
   };
 
@@ -778,7 +778,7 @@ async function cmdRun(flags, positionals) {
 
 async function cmdStatus(flags, positionals) {
   const taskId = positionals[0];
-  if (!taskId) throw new UsageError("Укажите taskId: velsvisual status TASK_ID");
+  if (!taskId) throw new UsageError("Укажите taskId: kie status TASK_ID");
   const client = makeClient();
   let status;
   if (flags["--api"]) {
@@ -811,7 +811,7 @@ async function cmdWait(flags, positionals) {
 
 async function cmdDownload(flags, positionals) {
   const url = positionals[0];
-  if (!url) throw new UsageError("Укажите URL: velsvisual download URL [-o ПУТЬ]");
+  if (!url) throw new UsageError("Укажите URL: kie download URL [-o ПУТЬ]");
   let dest = flags["--output"];
   if (!dest) dest = urlFilename(url, "download");
   if (fs.existsSync(dest) && fs.statSync(dest).isDirectory()) {
@@ -824,17 +824,16 @@ async function cmdDownload(flags, positionals) {
 
 function cmdConfig(flags) {
   const key = flags["--set-key"];
-  if (!key) throw new UsageError("Укажите ключ: velsvisual config --set-key ВАШ_КЛЮЧ");
+  if (!key) throw new UsageError("Укажите ключ: kie config --set-key ВАШ_КЛЮЧ");
   saveApiKey(key);
   emit(flags, { config: CONFIG_PATH }, () => console.log(`Ключ сохранён в ${CONFIG_PATH}`));
   return 0;
 }
 
 // ------------------------------------------------------------------ help
-const HELP = `kie-media-cli ${VERSION} (alias: velsvisual) — генерация фото/видео/аудио через KIE API (kie.ai).
-Аналог Higgsfield CLI: higgsfield generate create ↔ kie run / kie generate create
+const HELP = `kie-media-cli ${VERSION} — генерация фото/видео/аудио через KIE API (kie.ai).
 
-Использование: kie <команда> [флаги]  (или velsvisual)
+Использование: kie <команда> [флаги]
 
 Команды:
   setup        мастер первичной настройки (ключ + скилл агента), alias: init
@@ -842,7 +841,7 @@ const HELP = `kie-media-cli ${VERSION} (alias: velsvisual) — генераци�
   credits      баланс кредитов
   models       реестр моделей (живой каталог docs.kie.ai, кэш 24ч)
                  флаги: --refresh, --category image|video|audio, --search ТЕКСТ
-                 алиасы: --image/--video/--audio (как higgsfield model list --video)
+                 алиасы: --image/--video/--audio
   pricing      цены моделей в кредитах и $ (kie.ai/pricing, кэш 24ч)
                  флаги: --refresh, --category image|video|audio, --search ТЕКСТ
                --search понимает синонимы задач: edit = image-to-image = i2i =
@@ -866,14 +865,14 @@ const HELP = `kie-media-cli ${VERSION} (alias: velsvisual) — генераци�
                  --timeout СЕК         таймаут --wait (по умолч. 600, понимает 10m/600s)
                  --interval СЕК        интервал polling (по умолч. 5, понимает 3s)
                  --download КАТАЛОГ    скачать результаты (с --wait)
-  cost МОДЕЛЬ  оценка стоимости без создания задачи (аналог higgsfield generate cost)
+  cost МОДЕЛЬ  оценка стоимости без создания задачи
                  флаги как у run (без --wait/--download), + --json
   status ID    статус задачи; без --api — автоперебор: ${CASCADE_ORDER.join(" → ")}
   wait ID      дождаться завершения задачи (--timeout 600 --interval 5, понимает 10m/3s)
   download URL скачать файл (-o ПУТЬ)
   config       сохранить ключ: --set-key KEY
 
-Алиасы Higgsfield (совместимость):
+Иерархические аліасы команд:
   model list [--image|--video|--audio] [--json]  → models
   model get <модель> [--json|--raw]              → schema
   generate create <модель> [флаги run]           → run
@@ -883,15 +882,10 @@ const HELP = `kie-media-cli ${VERSION} (alias: velsvisual) — генераци�
   generate wait <id> [--json]                    → wait
   workflow list / workflow get <name>            → список воркфлоу KIE
 
-Примеры Higgsfield → KIE:
-  higgsfield model list --video --json        → kie model list --video --json
-  higgsfield generate create nano_banana_2 --prompt "cat" --wait → kie run google/nano-banana --prompt "cat" --wait
-  higgsfield generate cost nano_banana_2 --prompt "cat" → kie cost google/nano-banana --prompt "cat"
-
 Общий флаг: --json — машинный вывод в JSON.
 Ключ API: env KIE_API_KEY или ${CONFIG_PATH}`;
 
-// helpers — парсинг таймаутов как в higgsfield (10m, 3s, 600)
+// helpers — парсинг таймаутов (10m, 3s, 600)
 export function parseDuration(value, fallback) {
   if (value === undefined || value === null || value === "") return fallback;
   const s = String(value).trim();
@@ -902,7 +896,7 @@ export function parseDuration(value, fallback) {
   return unit === "m" ? Math.round(n * 60) : Math.round(n);
 }
 
-// ------------------------------------------------------------------ workflows stub (KIE пока без воркфлоу как у Higgsfield)
+// ------------------------------------------------------------------ workflows stub
 const WORKFLOWS = [
   {
     name: "image-to-video",
@@ -959,8 +953,7 @@ async function cmdWorkflowGet(flags, positionals) {
   return 0;
 }
 
-// history — локальная история задач (аналог higgsfield generate list)
-const HISTORY_PATH = path.join(os.homedir(), ".velsvisual", "history.json");
+const HISTORY_PATH = path.join(os.homedir(), ".kie-media", "history.json");
 const HISTORY_LIMIT = 100;
 function loadHistory() {
   try {
@@ -989,7 +982,7 @@ async function cmdHistoryList(flags) {
   return 0;
 }
 
-// cost — оценка без создания задачи (аналог higgsfield generate cost)
+// cost — оценка без создания задачи
 async function cmdCost(flags, positionals) {
   const modelId = positionals[0];
   if (!modelId) throw new UsageError("Укажите модель: kie cost <модель> [--prompt ...] [--image ...] [--set k=v]");
@@ -1137,12 +1130,12 @@ export async function main(argv = process.argv.slice(2)) {
     return 0;
   }
   if (argv[0] === "--version" || argv[0] === "-v") {
-    console.log(`kie-media-cli ${VERSION} (alias: velsvisual ${VERSION})`);
+    console.log(`kie-media-cli ${VERSION}`);
     return 0;
   }
   const [command, ...rest] = argv;
 
-  // --- Higgsfield-совместимые иерархические команды (generate/model) ---
+  // --- Иерархические команды (generate/model) ---
   // Они требуют проброса флагов подкоманд, поэтому парсим вручную, не через COMMAND_SPECS
   if (command === "generate") {
     try {

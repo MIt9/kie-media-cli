@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { main, parseDuration } from "../src/cli.js";
 
-// ------------------------------------------------------------------ parseDuration (higgsfield 10m/3s)
+// ------------------------------------------------------------------ parseDuration (10m/3s)
 test("parseDuration: понимает 10m, 3s, 600", () => {
   assert.equal(parseDuration("10m", 600), 600);
   assert.equal(parseDuration("3s", 5), 3);
@@ -11,8 +11,8 @@ test("parseDuration: понимает 10m, 3s, 600", () => {
   assert.throws(() => parseDuration("bad", 0), /Неверный формат/);
 });
 
-// ------------------------------------------------------------------ higgs parity aliases (без сети, dry-run)
-test("model list --json (higgs alias) — count >0", async () => {
+// ------------------------------------------------------------------ команда model и generate
+test("model list --json — count >0", async () => {
   let out = "";
   const origLog = console.log;
   console.log = (s) => { out += s + "\n"; };
@@ -47,7 +47,7 @@ test("model get --json — схема", async () => {
   assert.ok(Array.isArray(data.fields));
 });
 
-test("generate create --dry-run --json (higgs alias) — не требует ключа", async () => {
+test("generate create --dry-run --json — не требует ключа", async () => {
   let out = "";
   const origLog = console.log;
   console.log = (s) => { out += s + "\n"; };
@@ -106,12 +106,10 @@ test("generate list --json — история", async () => {
 });
 
 test("run --wait-timeout 1m alias — принимает 1m", async () => {
-  // dry-run + wait-timeout не должен падать на парсинге, но wait не триггерит сеть в dry-run
   let out = "";
   const origLog = console.log;
   console.log = (s) => { out += s + "\n"; };
   const code = await main(["generate", "create", "google/nano-banana", "--prompt", "test", "--dry-run", "--json", "--wait-timeout", "1m"]);
   console.log = origLog;
-  // dry-run игнорирует wait, просто проверяет что флаг распарсился
   assert.equal(code, 0);
 });

@@ -210,7 +210,7 @@ test("buildInput: подсказка про schema, если модель не �
   };
   assert.throws(
     () => buildInput(dynamic, { prompt: "x", images: ["./a.png"] }),
-    /velsvisual schema vendor\/new-model/
+    /kie schema vendor\/new-model/
   );
 });
 
