@@ -19,7 +19,7 @@ import { SEED_MODELS } from "../src/models.js";
 const registry = new Map(Object.entries(SEED_MODELS));
 
 // ------------------------------------------------------------------ parseArgs
-test("parseArgs: bool/value/multi/позиционные/--flag=value", () => {
+test("parseArgs: bool/value/multi/positionals/--flag=value", () => {
   const { flags, positionals } = parseArgs(
     ["model/x", "--prompt", "hi", "--image", "a.png", "--image=b.png", "--wait", "--set", "k=1"],
     { bool: ["--wait"], value: ["--prompt"], multi: ["--image", "--set"] }
@@ -31,46 +31,41 @@ test("parseArgs: bool/value/multi/позиционные/--flag=value", () => {
   assert.deepEqual(flags["--set"], ["k=1"]);
 });
 
-test("parseArgs: неизвестный флаг и alias", () => {
+test("parseArgs: unknown flag and alias", () => {
   assert.throws(() => parseArgs(["--nope"], {}), UsageError);
   const { flags } = parseArgs(["-o", "out.png"], { value: ["--output"], alias: { "-o": "--output" } });
   assert.equal(flags["--output"], "out.png");
 });
 
 // ------------------------------------------------------------------ search
-test("squashText: регистр, дефисы, слэши и точки не влияют на сравнение", () => {
+test("squashText: case, hyphens, slashes and dots do not affect comparison", () => {
   assert.equal(squashText("Nano-Banana / 2.0"), "nanobanana20");
   assert.equal(squashText(null), "");
 });
 
-test("expandSearchTerms: запрос разворачивается в синонимический кластер", () => {
+test("expandSearchTerms: query expands to synonym cluster", () => {
   const terms = expandSearchTerms("edit");
   assert.ok(terms.includes("imagetoimage"));
   assert.ok(terms.includes("remix"));
-  // "редактирование" подхватывается по основе "редактир"
-  assert.ok(expandSearchTerms("редактирование").includes("imagetoimage"));
-  // запрос вне кластеров остаётся собой
   assert.deepEqual(expandSearchTerms("seedream"), ["seedream"]);
   assert.deepEqual(expandSearchTerms(""), []);
 });
 
-test("matchesSearch: edit находит модели, названные image-to-image", () => {
+test("matchesSearch: edit matches models named image-to-image", () => {
   const terms = expandSearchTerms("edit");
   assert.ok(matchesSearch(terms, "gpt-image-2-image-to-image", "GPT Image 2 - Image To Image"));
-  assert.ok(matchesSearch(terms, "google/nano-banana-edit", "Редактирование изображений."));
+  assert.ok(matchesSearch(terms, "google/nano-banana-edit", "Image editing."));
   assert.ok(matchesSearch(terms, "ideogram/v3-remix", ""));
   assert.ok(!matchesSearch(terms, "gpt-image/1.5-text-to-image", "GPT Image 1.5 text-to-image."));
 });
 
-test("matchesSearch: обратное направление и пустой запрос", () => {
-  // image-to-image находит модели, названные edit
+test("matchesSearch: reverse direction and empty query", () => {
   assert.ok(matchesSearch(expandSearchTerms("image-to-image"), "qwen/image-edit", ""));
-  // без запроса фильтр пропускает всё
-  assert.ok(matchesSearch([], "любая/модель", null));
+  assert.ok(matchesSearch([], "any/model", null));
 });
 
 // ------------------------------------------------------------------ --set
-test("parseSetValue: JSON или строка", () => {
+test("parseSetValue: JSON or string", () => {
   assert.equal(parseSetValue("true"), true);
   assert.equal(parseSetValue("false"), false);
   assert.equal(parseSetValue("5"), 5);
@@ -84,12 +79,12 @@ test("parseSetValue: JSON или строка", () => {
 });
 
 // ------------------------------------------------------------------ buildInput
-test("buildInput: промпт в prompt_field модели", () => {
+test("buildInput: prompt mapped to model prompt_field", () => {
   const model = resolveModel("elevenlabs/text-to-speech-turbo-2-5", null, registry);
-  assert.deepEqual(buildInput(model, { prompt: "привет" }), { text: "привет" });
+  assert.deepEqual(buildInput(model, { prompt: "hello" }), { text: "hello" });
 });
 
-test("buildInput: image list vs scalar, защита от лишних", () => {
+test("buildInput: image list vs scalar, extra image protection", () => {
   const kling = resolveModel("kling-2.6/image-to-video", null, registry);
   const data = buildInput(kling, { prompt: "go", images: ["https://x/1.png"] });
   assert.deepEqual(data.image_urls, ["https://x/1.png"]);
@@ -106,7 +101,7 @@ test("buildInput: image list vs scalar, защита от лишних", () => {
   assert.throws(() => buildInput(nano, { prompt: "go", images: ["https://x/1.png"] }), UsageError);
 });
 
-test("buildInput: приоритет prompt < --set < --json-input", () => {
+test("buildInput: priority prompt < --set < --json-input", () => {
   const model = resolveModel("google/nano-banana", null, registry);
   const data = buildInput(model, {
     prompt: "a",
@@ -116,20 +111,20 @@ test("buildInput: приоритет prompt < --set < --json-input", () => {
   assert.deepEqual(data, { prompt: "c", n: 3 });
 });
 
-test("buildInput: suno — model по умолчанию V5, --set переопределяет", () => {
+test("buildInput: suno default model V5, --set overrides", () => {
   const model = resolveModel("suno", null, registry);
   assert.equal(buildInput(model, { prompt: "song" }).model, "V5");
   assert.equal(buildInput(model, { prompt: "song", setPairs: ["model=V4_5"] }).model, "V4_5");
 });
 
-test("resolveModel: неизвестная модель требует --api", () => {
+test("resolveModel: unknown model requires --api", () => {
   assert.throws(() => resolveModel("some/future-model", null, registry), UsageError);
   const generic = resolveModel("some/future-model", "jobs", registry);
   assert.equal(generic.api, "jobs");
 });
 
 // ------------------------------------------------------------------ validateInput
-test("validateInput: required image-поле до сети (topaz)", () => {
+test("validateInput: required image field pre-flight check (topaz)", () => {
   const model = resolveModel("topaz/image-upscale", null, registry);
   assert.throws(
     () => validateInput(model, buildInput(model, { prompt: "x" })),
@@ -138,7 +133,7 @@ test("validateInput: required image-поле до сети (topaz)", () => {
   validateInput(model, buildInput(model, { images: ["./local.png"] }));
 });
 
-test("validateInput: обязательные поля kling через --set", () => {
+test("validateInput: required kling fields via --set", () => {
   const model = resolveModel("kling-2.6/text-to-video", null, registry);
   assert.throws(
     () => validateInput(model, buildInput(model, { prompt: "x" })),
@@ -158,7 +153,7 @@ test("validateInput: обязательные поля kling через --set", 
   assert.equal(data.duration, 5);
 });
 
-test("validateInput: gpt4o — size обязателен, нужен prompt или filesUrl", () => {
+test("validateInput: gpt4o size required, prompt or filesUrl needed", () => {
   const model = resolveModel("gpt4o-image", null, registry);
   assert.throws(() => validateInput(model, buildInput(model, { prompt: "x" })), /size/);
   assert.throws(
@@ -168,7 +163,7 @@ test("validateInput: gpt4o — size обязателен, нужен prompt ил
   validateInput(model, buildInput(model, { prompt: "x", setPairs: ["size=1:1"] }));
 });
 
-test("validateInput: suno customMode требует style и title", () => {
+test("validateInput: suno customMode requires style and title", () => {
   const model = resolveModel("suno", null, registry);
   assert.throws(
     () => validateInput(model, buildInput(model, { prompt: "song", setPairs: ["customMode=true"] })),
@@ -183,27 +178,27 @@ test("validateInput: suno customMode требует style и title", () => {
   );
 });
 
-test("validateInput: динамическая модель — мягкая валидация", () => {
+test("validateInput: dynamic model soft validation", () => {
   const dynamic = {
     category: "video", api: "jobs", prompt_field: "prompt",
     image_field: null, image_list: false, required: [], dynamic: true,
   };
-  validateInput(dynamic, buildInput(dynamic, { prompt: "что угодно" }));
+  validateInput(dynamic, buildInput(dynamic, { prompt: "anything" }));
 });
 
 // ------------------------------------------------------------------ defaults
-test("buildInput: обязательные поля с дефолтом подставляются, --set главнее", () => {
+test("buildInput: required fields with defaults applied, --set has higher priority", () => {
   const model = resolveModel("flux-2/pro-text-to-image", null, registry);
-  const data = buildInput(model, { prompt: "кот" });
+  const data = buildInput(model, { prompt: "cat" });
   assert.equal(data.aspect_ratio, "1:1");
   assert.equal(data.resolution, "1K");
 
-  const custom = buildInput(model, { prompt: "кот", setPairs: ["aspect_ratio=16:9"] });
+  const custom = buildInput(model, { prompt: "cat", setPairs: ["aspect_ratio=16:9"] });
   assert.equal(custom.aspect_ratio, "16:9");
   validateInput(model, data);
 });
 
-test("buildInput: подсказка про schema, если модель не описывает поле картинки", () => {
+test("buildInput: hint for schema if model does not describe image field", () => {
   const dynamic = {
     id: "vendor/new-model", category: "video", api: "jobs", prompt_field: "prompt",
     image_field: null, image_list: false, required: [], dynamic: true,
@@ -214,9 +209,9 @@ test("buildInput: подсказка про schema, если модель не �
   );
 });
 
-// ------------------------------------------------------------------ загрузка файлов
-test("resolveLocalFiles: локальные файлы грузятся из любого поля, URL не трогаются", async () => {
-  const file = fileURLToPath(import.meta.url); // существующий файл
+// ------------------------------------------------------------------ file uploads
+test("resolveLocalFiles: local files uploaded from any field, URLs untouched", async () => {
+  const file = fileURLToPath(import.meta.url);
   const uploads = [];
   const client = {
     upload: async (path) => {
@@ -226,7 +221,7 @@ test("resolveLocalFiles: локальные файлы грузятся из л�
   };
   const model = { prompt_field: "prompt", image_field: null };
   const data = {
-    prompt: "текст промпта",
+    prompt: "prompt text",
     first_frame_url: file,
     reference_image_urls: [file, "https://cdn/x.png", "asset://asset-1"],
     resolution: "480p",
@@ -235,21 +230,20 @@ test("resolveLocalFiles: локальные файлы грузятся из л�
   await resolveLocalFiles(client, model, data, () => {});
 
   assert.match(data.first_frame_url, /^https:\/\/uploaded\//);
-  // один и тот же файл загружается один раз
   assert.equal(uploads.length, 1);
   assert.equal(data.reference_image_urls[0], data.first_frame_url);
   assert.equal(data.reference_image_urls[1], "https://cdn/x.png");
   assert.equal(data.reference_image_urls[2], "asset://asset-1");
   assert.equal(data.resolution, "480p");
   assert.equal(data.duration, 6);
-  assert.equal(data.prompt, "текст промпта");
+  assert.equal(data.prompt, "prompt text");
 });
 
-test("resolveLocalFiles: для --image путь обязан быть файлом или URL", async () => {
+test("resolveLocalFiles: for --image path must be file or URL", async () => {
   const client = { upload: async () => "https://uploaded/1.png" };
   const model = { prompt_field: "prompt", image_field: "image_url" };
   await assert.rejects(
-    () => resolveLocalFiles(client, model, { image_url: "./нет-такого-файла.png" }, () => {}),
+    () => resolveLocalFiles(client, model, { image_url: "./no-such-file.png" }, () => {}),
     UsageError
   );
 });

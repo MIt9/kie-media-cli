@@ -1,8 +1,8 @@
 /**
- * kie setup (alias init) — интерактивный мастер первичной настройки:
- * 1) API-ключ KIE (проверка через credits, сохранение в ~/.kie-media/config.json);
- * 2) установка скилла visual для агента (npx skills add <repo> или --local — копия из пакета);
- * 3) сводка и подсказки.
+ * kie setup (alias init) — interactive setup wizard:
+ * 1) KIE API key (validation via credits, save to ~/.kie-media/config.json);
+ * 2) Agent skill installation (npx skills add <repo> or --local copy from package);
+ * 3) Summary and next steps.
  */
 
 import fs from "node:fs";
@@ -12,9 +12,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { KieClient, KieError } from "./client.js";
-import { getApiKey, saveApiKey } from "./cli.js";
+import { saveApiKey } from "./cli.js";
 
-// Репозиторий скилла для `npx skills add <repo>`.
 export const SKILLS_REPO = "MIt9/kie-skills/kie-generate";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -26,7 +25,6 @@ function createAsker(interactive) {
   }
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
   const ask = (question) => new Promise((resolve) => rl.question(question, (a) => resolve(a.trim())));
-  // Ввод секрета: эхо маскируется звёздочками (и при наборе, и при вставке).
   const askSecret = (question) =>
     new Promise((resolve) => {
       const original = rl._writeToOutput.bind(rl);
@@ -46,10 +44,9 @@ async function askYesNo(ask, question, defaultYes = true) {
   const suffix = defaultYes ? "[Y/n]" : "[y/N]";
   const answer = (await ask(`${question} ${suffix} `)).toLowerCase();
   if (!answer) return defaultYes;
-  return answer === "y" || answer === "yes" || answer === "д" || answer === "да";
+  return answer === "y" || answer === "yes";
 }
 
-/** Проверка ключа через credits. Возвращает { ok, credits, invalid } . */
 async function validateKey(key) {
   try {
     const credits = await new KieClient(key).credits();
@@ -62,63 +59,62 @@ async function validateKey(key) {
 
 async function stepApiKey({ asker, interactive, yes }) {
   const { ask, askSecret } = asker;
-  console.log("\nШаг 1/2. API-ключ KIE");
+  console.log("\nStep 1/2. KIE API Key");
   const envKey = (process.env.KIE_API_KEY || "").trim();
 
   let key = null;
   if (yes) {
-    // Неинтерактивно: берём только env-ключ.
     if (envKey) {
       key = envKey;
-      console.log("  Найден KIE_API_KEY в окружении — использую его.");
+      console.log("  Found KIE_API_KEY in environment — using it.");
     } else {
-      console.log("  KIE_API_KEY не задан в окружении — ключ не сохранён.");
-      console.log("  Задайте позже: export KIE_API_KEY=ваш_ключ");
-      console.log("  или: kie config --set-key ваш_ключ");
+      console.log("  KIE_API_KEY not set in environment — key not saved.");
+      console.log("  Set it later: export KIE_API_KEY=your_key");
+      console.log("  or: kie config --set-key your_key");
       return { saved: false, credits: null };
     }
   } else {
     if (envKey) {
-      const useEnv = await askYesNo(ask, "  Найден KIE_API_KEY в окружении. Использовать его?", true);
+      const useEnv = await askYesNo(ask, "  Found KIE_API_KEY in environment. Use it?", true);
       if (useEnv) key = envKey;
     }
     while (!key) {
-      key = await askSecret("  Введите API ключ KIE (https://kie.ai/api-key): ");
+      key = await askSecret("  Enter KIE API Key (https://kie.ai/api-key): ");
       if (!key) {
-        const abort = !(await askYesNo(ask, "  Ключ не введён. Попробовать ещё раз?", true));
+        const abort = !(await askYesNo(ask, "  No key entered. Try again?", true));
         if (abort) {
-          console.log("  Пропускаю. Сохранить позже: kie config --set-key ваш_ключ");
+          console.log("  Skipped. Save later: kie config --set-key your_key");
           return { saved: false, credits: null };
         }
       }
     }
   }
 
-  process.stdout.write("  Проверяю ключ (запрос баланса)... ");
+  process.stdout.write("  Verifying API key (credit balance check)... ");
   const check = await validateKey(key);
   if (check.ok) {
-    console.log(`OK, баланс: ${check.credits} кредитов.`);
+    console.log(`OK, balance: ${check.credits} credits.`);
   } else if (check.invalid) {
-    console.log("ключ невалиден (401).");
-    if (!yes && interactive && (await askYesNo(ask, "  Повторить ввод ключа?", true))) {
+    console.log("invalid key (401).");
+    if (!yes && interactive && (await askYesNo(ask, "  Try entering key again?", true))) {
       return stepApiKey({ asker, interactive, yes: false });
     }
-    console.log("  Ключ НЕ сохранён. Повторите: kie setup");
+    console.log("  Key NOT saved. Retry: kie setup");
     return { saved: false, credits: null };
   } else {
-    console.log(`не удалось проверить (${check.error || "сеть недоступна"}).`);
-    console.log("  Сохраняю ключ без проверки — проверьте позже: kie credits");
+    console.log(`failed to verify (${check.error || "network unavailable"}).`);
+    console.log("  Saving key without verification — check later: kie credits");
   }
 
   saveApiKey(key);
-  console.log(`  Ключ сохранён (chmod 600).`);
+  console.log(`  Key saved to ~/.kie-media/config.json (chmod 600).`);
   return { saved: true, credits: check.credits };
 }
 
 function installSkillLocal() {
   const dest = path.join(process.cwd(), ".agents", "skills", "visual");
   if (!fs.existsSync(BUNDLED_SKILL_DIR)) {
-    console.log(`  Бандл скилла не найден в пакете: ${BUNDLED_SKILL_DIR}`);
+    console.log(`  Bundled skill not found: ${BUNDLED_SKILL_DIR}`);
     return null;
   }
   fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -133,50 +129,47 @@ function npxAvailable() {
 
 async function stepSkill({ asker, interactive, yes, local, repo }) {
   const { ask } = asker;
-  console.log("\nШаг 2/2. Скилл kie-generate для агента");
+  console.log("\nStep 2/2. Agent Skill kie-generate");
   const manual = `npx -y skills add ${repo}`;
 
   if (local) {
     const dest = installSkillLocal();
     if (dest) {
-      console.log(`  Скилл скопирован из пакета в ${dest}`);
+      console.log(`  Skill copied to ${dest}`);
       return { installed: true, how: "local", dest };
     }
-    console.log(`  Установите вручную: ${manual}`);
+    console.log(`  Install manually: ${manual}`);
     return { installed: false, how: null };
   }
 
   let want = true;
   if (!yes && interactive) {
-    want = await askYesNo(ask, "  Установить скилл kie-generate для агента?", true);
+    want = await askYesNo(ask, "  Install agent skill kie-generate?", true);
   }
 
   if (want && !yes && interactive && npxAvailable()) {
-    console.log(`  Запускаю: ${manual}`);
+    console.log(`  Running: ${manual}`);
     const result = spawnSync("npx", ["-y", "skills", "add", repo], { stdio: "inherit" });
     if (result.status === 0) return { installed: true, how: "npx" };
-    console.log("  Установка через npx не удалась.");
+    console.log("  Installation via npx failed.");
   }
 
-  // Отказ, неинтерактивный режим без --local, или npx недоступен — печатаем команду.
-  console.log("  Установите скилл вручную:");
+  console.log("  Install skill manually:");
   console.log(`    ${manual}`);
-  console.log("  или локально из пакета: kie setup --local");
+  console.log("  or locally from package: kie setup --local");
   return { installed: false, how: null };
 }
 
-/**
- * Мастер настройки. Флаги: --yes (неинтерактивно), --local, --repo РЕПО.
- */
+/** Setup wizard entry point. Flags: --yes, --local, --repo REPO. */
 export async function runSetup(flags = {}) {
   const yes = Boolean(flags["--yes"]);
   const local = Boolean(flags["--local"]);
   const repo = flags["--repo"] || process.env.KIE_SKILLS_REPO || SKILLS_REPO;
   const interactive = !yes && Boolean(process.stdin.isTTY);
 
-  console.log("KIE Media CLI — первичная настройка");
+  console.log("KIE Media CLI — Initial Setup");
   if (!yes && !interactive) {
-    console.log("(stdin не интерактивен — работаю как --yes: без вопросов)");
+    console.log("(non-interactive stdin — running with --yes)");
   }
 
   const asker = createAsker(interactive);
@@ -188,17 +181,17 @@ export async function runSetup(flags = {}) {
     asker.close();
   }
 
-  console.log("\nГотово. Сводка:");
-  console.log(`  API-ключ:     ${keyResult.saved ? "сохранён в ~/.kie-media/config.json" : "не сохранён"}`);
+  console.log("\nComplete. Summary:");
+  console.log(`  API Key:     ${keyResult.saved ? "saved to ~/.kie-media/config.json" : "not saved"}`);
   if (keyResult.credits !== null && keyResult.credits !== undefined) {
-    console.log(`  Баланс:       ${keyResult.credits} кредитов`);
+    console.log(`  Balance:     ${keyResult.credits} credits`);
   }
   console.log(
-    `  Скилл:        ${skillResult.installed ? `установлен (${skillResult.how})` : "не установлен — команда выше"}`
+    `  Agent Skill: ${skillResult.installed ? `installed (${skillResult.how})` : "not installed — command printed above"}`
   );
-  console.log("\nДальше:");
-  console.log("  kie models                 # живой реестр моделей");
-  console.log('  kie run google/nano-banana --prompt "рыжий кот в скафандре" \\');
-  console.log("    --wait --download ./out           # первая генерация");
+  console.log("\nNext Steps:");
+  console.log("  kie models                 # inspect live model catalog");
+  console.log('  kie run google/nano-banana --prompt "red cat in a spacesuit" \\');
+  console.log("    --wait --download ./out  # first generation");
   return 0;
 }

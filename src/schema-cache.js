@@ -1,9 +1,8 @@
 /**
- * Кэш схем моделей: docUrl → поля input (~/.kie-media/schema-cache.json, TTL 24ч).
+ * Model schema cache: docUrl → input fields (~/.kie-media/schema-cache.json, TTL 24h).
  *
- * Нужен, чтобы `run` мог узнать поля незнакомой модели из живой документации,
- * не платя сетевым запросом за каждый запуск и не требуя обновления CLI при
- * появлении новых моделей в каталоге kie.ai.
+ * Allows `run` to inspect unknown model fields from live documentation
+ * without making network requests on every launch.
  */
 
 import fs from "node:fs";
@@ -21,7 +20,7 @@ function readCache(cachePath) {
     const raw = JSON.parse(fs.readFileSync(cachePath, "utf8"));
     if (raw && typeof raw === "object" && raw.entries && typeof raw.entries === "object") return raw;
   } catch {
-    // нет файла или битый JSON
+    // missing file or invalid JSON
   }
   return { entries: {} };
 }
@@ -31,14 +30,13 @@ function writeCache(cache, cachePath) {
     fs.mkdirSync(path.dirname(cachePath), { recursive: true });
     fs.writeFileSync(cachePath, JSON.stringify(cache));
   } catch {
-    // кэш — оптимизация: не можем записать (read-only FS) — работаем без него
+    // cache is an optimization: continue without saving if write fails
   }
 }
 
 /**
- * Поля input модели по её docUrl: из кэша или из сети.
- * Возвращает { fields, meta, source: cache|live|stale-cache } либо null,
- * если схему получить не удалось (сеть недоступна и кэша нет).
+ * Model input fields by docUrl: from cache or network.
+ * Returns { fields, meta, source: cache|live|stale-cache } or null if unavailable.
  */
 export async function loadModelSchema(docUrl, {
   refresh = false,
@@ -64,7 +62,7 @@ export async function loadModelSchema(docUrl, {
       return { fields, meta: deriveModelMeta(fields), source: "live" };
     }
   } catch {
-    // сеть недоступна или страница пропала — падаем на устаревший кэш ниже
+    // network or page unavailable — fallback to stale cache
   }
 
   if (cached) {
@@ -74,9 +72,9 @@ export async function loadModelSchema(docUrl, {
 }
 
 /**
- * Метаданные модели с учётом её живой схемы.
- * Для моделей из seed-реестра выверенные вручную метаданные приоритетны, схема
- * лишь дополняет пропуски; для моделей живого каталога (dynamic) схема — источник истины.
+ * Merges model metadata with its live schema.
+ * For seed models, manually verified metadata takes precedence.
+ * For dynamic models, schema is source of truth.
  */
 export function mergeModelMeta(model, schemaMeta) {
   if (!schemaMeta) return model;
@@ -93,7 +91,6 @@ export function mergeModelMeta(model, schemaMeta) {
     return merged;
   }
 
-  // seed-модель: дополняем только то, чего в реестре нет
   if (!merged.image_field && schemaMeta.image_field) {
     merged.image_field = schemaMeta.image_field;
     merged.image_list = schemaMeta.image_list;

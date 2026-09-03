@@ -1,19 +1,11 @@
 /**
- * Рекомендации моделей: группировка реестра по семействам, выбор топовой
- * (последней) модели семейства и привязка цен из прайс-листа (src/pricing.js).
- *
- * Логика «топовая модель семейства»: максимальная версия; при равной версии —
- * самая дорогая по прайсу (дороже ≈ качественнее), затем базовый вариант
- * (без суффикса mini/lite/fast/...).
+ * Model recommendations: group registry models by family, select top (latest)
+ * model per family, and associate pricing from pricing list (src/pricing.js).
  */
 
 import { priceForModel } from "./pricing.js";
 
-/**
- * Известные популярные семейства по категориям, в порядке узнаваемости.
- * Ключ матчится подстрокой по нормализованному имени семейства, поэтому
- * новые версии семейства подхватываются автоматически.
- */
+/** Popular model families by category in order of recognition. */
 export const POPULAR_FAMILIES = {
   image: ["nano-banana", "gpt-image", "flux", "seedream", "imagen"],
   video: ["seedance", "veo", "kling", "hailuo", "sora", "grok-imagine"],
@@ -21,12 +13,10 @@ export const POPULAR_FAMILIES = {
 };
 
 /**
- * Разбор id модели на семейство/версию/суффикс.
+ * Parses model id into family/version/suffix.
  * "google/nano-banana-2"        → family "google-nano-banana", version 2, suffix ""
  * "bytedance/seedance-2-mini"   → family "bytedance-seedance", version 2, suffix "mini"
- * "kling/v2-5-turbo-…-pro"      → family "kling", version 2.5
  * "veo3_fast"                   → family "veo", version 3, suffix "fast"
- * "suno"                        → family "suno", version 0
  */
 export function familyOf(modelId) {
   const norm = String(modelId)
@@ -41,20 +31,17 @@ export function familyOf(modelId) {
   return { family, version: Number(match[1]) + minor, suffix };
 }
 
-/** Ключ популярного семейства, которому соответствует family (null — семейство не из списка). */
 function popularityKey(category, family) {
   const keys = POPULAR_FAMILIES[category] || [];
   return keys.find((key) => family.includes(key)) || null;
 }
 
-/** Порядковый индекс семейства в списке популярных (Infinity — семейство не из списка). */
 function popularityIndex(category, family) {
   const key = popularityKey(category, family);
   if (key === null) return Infinity;
   return POPULAR_FAMILIES[category].indexOf(key);
 }
 
-/** Топовая модель семейства: свежая версия, затем дороже, затем базовый вариант. */
 function pickTopModel(candidates, pricingRecords) {
   const decorated = candidates.map(([id, entry]) => {
     const parsed = familyOf(id);
@@ -71,11 +58,8 @@ function pickTopModel(candidates, pricingRecords) {
 }
 
 /**
- * Рекомендации для категории: топовая модель каждого из самых популярных
- * семейств с ценами. registryModels — Map<id, entry> из loadRegistry,
- * pricingRecords — записи loadPricing. Возвращает до limit вариантов,
- * отсортированных по цене (дорогие = качественнее), с тиром
- * quality|balanced|budget (null, если цена неизвестна).
+ * Returns recommended models for a category (up to limit models).
+ * Tiers: quality | balanced | budget (null if price unknown).
  */
 export function recommend(category, registryModels, pricingRecords, { limit = 4 } = {}) {
   const families = new Map();
@@ -100,8 +84,6 @@ export function recommend(category, registryModels, pricingRecords, { limit = 4 
     a.family.localeCompare(b.family)
   );
 
-  // Одно популярное семейство — один слот: живой каталог и seed могут давать
-  // одно семейство под разными id ("nano-banana-2" и "google/nano-banana").
   const seenKeys = new Set();
   const deduped = tops.filter(({ popKey }) => {
     if (popKey === null) return true;
@@ -126,7 +108,6 @@ export function recommend(category, registryModels, pricingRecords, { limit = 4 
       : null,
   }));
 
-  // Тиры по цене: самый дорогой — quality, самый дешёвый — budget, остальные — balanced.
   const priced = chosen.filter((c) => c.pricing);
   for (const option of chosen) option.tier = null;
   if (priced.length > 0) {

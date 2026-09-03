@@ -6,6 +6,6 @@ main()
     process.exitCode = code;
   })
   .catch((exc) => {
-    console.error(`Неожиданная ошибка: ${exc.stack || exc}`);
+    console.error(`Unexpected error: ${exc.stack || exc}`);
     process.exitCode = 1;
   });

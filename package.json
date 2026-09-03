@@ -1,11 +1,11 @@
 {
   "name": "kie-media-cli",
-  "version": "0.3.0",
-  "description": "CLI для KIE API (kie.ai): генерация image/video/audio через единую команду run, живой реестр моделей, схемы и цены",
+  "version": "0.3.1",
+  "description": "CLI tool for KIE API (kie.ai): generate image/video/audio via a unified run command, live model registry, schemas, and pricing",
   "type": "module",
   "bin": {
-    "kie": "./bin/kie.js",
-    "kie-media-cli": "./bin/kie.js"
+    "kie": "bin/kie.js",
+    "kie-media-cli": "bin/kie.js"
   },
   "engines": {
     "node": ">=18"

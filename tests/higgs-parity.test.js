@@ -3,15 +3,15 @@ import assert from "node:assert/strict";
 import { main, parseDuration } from "../src/cli.js";
 
 // ------------------------------------------------------------------ parseDuration (10m/3s)
-test("parseDuration: понимает 10m, 3s, 600", () => {
+test("parseDuration: parses 10m, 3s, 600", () => {
   assert.equal(parseDuration("10m", 600), 600);
   assert.equal(parseDuration("3s", 5), 3);
   assert.equal(parseDuration("600", 600), 600);
   assert.equal(parseDuration("0.5m", 0), 30);
-  assert.throws(() => parseDuration("bad", 0), /Неверный формат/);
+  assert.throws(() => parseDuration("bad", 0), /Invalid duration format/);
 });
 
-// ------------------------------------------------------------------ команда model и generate
+// ------------------------------------------------------------------ model & generate commands
 test("model list --json — count >0", async () => {
   let out = "";
   const origLog = console.log;
@@ -24,7 +24,7 @@ test("model list --json — count >0", async () => {
   assert.ok(Array.isArray(data.models));
 });
 
-test("model list --video --json — только video", async () => {
+test("model list --video --json — video only", async () => {
   let out = "";
   const origLog = console.log;
   console.log = (s) => { out += s + "\n"; };
@@ -35,7 +35,7 @@ test("model list --video --json — только video", async () => {
   assert.ok(data.models.every((m) => m.category === "video"));
 });
 
-test("model get --json — схема", async () => {
+test("model get --json — schema", async () => {
   let out = "";
   const origLog = console.log;
   console.log = (s) => { out += s + "\n"; };
@@ -47,7 +47,7 @@ test("model get --json — схема", async () => {
   assert.ok(Array.isArray(data.fields));
 });
 
-test("generate create --dry-run --json — не требует ключа", async () => {
+test("generate create --dry-run --json — requires no API key", async () => {
   let out = "";
   const origLog = console.log;
   console.log = (s) => { out += s + "\n"; };
@@ -59,7 +59,7 @@ test("generate create --dry-run --json — не требует ключа", asyn
   assert.equal(data.model, "google/nano-banana");
 });
 
-test("cost --json — pricing без создания задачи", async () => {
+test("cost --json — pricing without task creation", async () => {
   let out = "";
   const origLog = console.log;
   console.log = (s) => { out += s + "\n"; };
@@ -71,7 +71,7 @@ test("cost --json — pricing без создания задачи", async () =>
   assert.ok(data.pricing || data.note);
 });
 
-test("generate cost --json (alias) — то же что cost", async () => {
+test("generate cost --json (alias) — same as cost", async () => {
   let out = "";
   const origLog = console.log;
   console.log = (s) => { out += s + "\n"; };
@@ -93,7 +93,7 @@ test("workflow list --json", async () => {
   assert.ok(data.workflows.length >= 4);
 });
 
-test("generate list --json — история", async () => {
+test("generate list --json — history", async () => {
   let out = "";
   const origLog = console.log;
   console.log = (s) => { out += s + "\n"; };
@@ -105,7 +105,7 @@ test("generate list --json — история", async () => {
   assert.ok(Array.isArray(data.jobs));
 });
 
-test("run --wait-timeout 1m alias — принимает 1m", async () => {
+test("run --wait-timeout 1m alias — accepts 1m", async () => {
   let out = "";
   const origLog = console.log;
   console.log = (s) => { out += s + "\n"; };

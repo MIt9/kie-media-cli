@@ -1,9 +1,9 @@
 /**
- * HTTP-клиент KIE API (https://docs.kie.ai). Ноль зависимостей: fetch/FormData/Blob из Node >= 18.
+ * HTTP client for KIE API (https://docs.kie.ai). Zero dependencies: native fetch/FormData/Blob in Node >= 18.
  *
- * Конверт ответа: {"code": 200, "msg": "success", "data": ...}; успех — code == 200.
- * Коды ошибок: 401 ключ, 402 кредиты, 422 валидация, 429 rate limit,
- * 451 не скачалось входное изображение, 455 maintenance, 501 генерация не удалась.
+ * Response envelope: {"code": 200, "msg": "success", "data": ...}; success when code == 200.
+ * Error codes: 401 unauthorized, 402 credits, 422 validation, 429 rate limit,
+ * 451 input image fetch failed, 455 maintenance, 501 generation failed.
  */
 
 import fs from "node:fs";
@@ -30,25 +30,25 @@ export const STATUS_ENDPOINTS = {
   suno: "/api/v1/generate/record-info",
 };
 
-// Порядок перебора API при автоопределении по taskId (status/wait без --api).
+// Cascading API fallback order for auto-detection by taskId (status/wait without --api).
 export const CASCADE_ORDER = ["jobs", "veo", "suno", "gpt4o", "flux", "runway"];
 
-const NOT_FOUND_MARKERS = ["not found", "not exist", "no such", "does not exist", "не найден"];
+const NOT_FOUND_MARKERS = ["not found", "not exist", "no such", "does not exist"];
 
 const AUDIO_EXT = new Set([".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"]);
 const VIDEO_EXT = new Set([".mp4", ".mov", ".webm", ".mkv", ".avi"]);
 
-/** Ошибка API или сети. code — код из конверта ответа (может быть null). */
+/** API or network error. code is from response envelope (may be null). */
 export class KieError extends Error {
   constructor(msg, code = null) {
-    super(code !== null ? `Ошибка KIE API (code=${code}): ${msg}` : `Ошибка: ${msg}`);
+    super(code !== null ? `KIE API Error (code=${code}): ${msg}` : `Error: ${msg}`);
     this.name = "KieError";
     this.code = code;
     this.msg = String(msg);
   }
 }
 
-/** Задача с таким taskId не найдена в данном API (code==404 или msg «not found»). */
+/** Task not found in this API endpoint (code==404 or msg contains "not found"). */
 export class TaskNotFound extends KieError {
   constructor(msg, code = null) {
     super(msg, code);
@@ -64,10 +64,9 @@ function guessUploadPath(filePath) {
 }
 
 /**
- * Достаёт URL загруженного файла из ответа upload-эндпоинта.
- * Схема ответа менялась: downloadUrl (актуальная), fileUrl/url (старые),
- * плюс данные иногда лежат во вложенном объекте (data/result/file).
- * Возвращает URL или null.
+ * Extracts uploaded file URL from upload endpoint response.
+ * Handles different response shapes: downloadUrl, fileUrl, url, and nested properties.
+ * Returns URL string or null.
  */
 export function extractFileUrl(data, depth = 0) {
   if (!data || typeof data !== "object" || depth > 3) return null;
@@ -83,7 +82,7 @@ export function extractFileUrl(data, depth = 0) {
 }
 
 /**
- * Приводит ответ status-эндпоинта к единому виду:
+ * Normalizes status endpoint response into a unified format:
  * { api, state: pending|success|fail, urls, tracks, fail_msg, progress, raw }.
  */
 export function normalizeStatus(api, data) {
@@ -112,7 +111,7 @@ export function normalizeStatus(api, data) {
       }
     } else if (state === "fail") {
       result.state = "fail";
-      const failMsg = data.failMsg || "генерация не удалась";
+      const failMsg = data.failMsg || "generation failed";
       result.fail_msg = data.failCode ? `[${data.failCode}] ${failMsg}` : failMsg;
     }
     return result;
@@ -129,7 +128,7 @@ export function normalizeStatus(api, data) {
       }
     } else if (flag === 2 || flag === 3) {
       result.state = "fail";
-      result.fail_msg = data.errorMessage || data.failMsg || "генерация не удалась";
+      result.fail_msg = data.errorMessage || data.failMsg || "generation failed";
     }
     return result;
   }
@@ -143,7 +142,7 @@ export function normalizeStatus(api, data) {
       result.urls = url ? [url] : [];
     } else if (state === "fail") {
       result.state = "fail";
-      result.fail_msg = data.failMsg || "генерация не удалась";
+      result.fail_msg = data.failMsg || "generation failed";
     }
     return result;
   }
@@ -163,16 +162,15 @@ export function normalizeStatus(api, data) {
       result.urls = result.tracks.filter((t) => t.audioUrl).map((t) => t.audioUrl);
     } else if (status.includes("FAILED") || status === "SENSITIVE_WORD_ERROR") {
       result.state = "fail";
-      result.fail_msg = data.errorMessage || status || "генерация не удалась";
+      result.fail_msg = data.errorMessage || status || "generation failed";
     }
-    // PENDING | TEXT_SUCCESS | FIRST_SUCCESS — ещё в работе
     return result;
   }
 
   return result;
 }
 
-/** Тонкий клиент KIE API: Bearer-авторизация, конверт code/msg/data. */
+/** Lightweight KIE API client with Bearer authentication and envelope handling. */
 export class KieClient {
   constructor(apiKey, baseUrl = BASE_URL) {
     this.apiKey = apiKey;
@@ -195,15 +193,14 @@ export class KieClient {
       throw new KieError(`HTTP ${resp.status}: ${text.slice(0, 300)}`);
     }
     if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
-      throw new KieError(`Неожиданный ответ API: ${String(payload).slice(0, 300)}`);
+      throw new KieError(`Unexpected API response: ${String(payload).slice(0, 300)}`);
     }
     const code = payload.code;
     if (code === 200) return payload.data;
-    // upload-хост иногда отвечает без конверта: {success: true, downloadUrl: ...}
     if (code === undefined && payload.success === true && resp.ok) return payload;
     const msg = String(payload.msg || payload.message || "");
     if (code === 404 || NOT_FOUND_MARKERS.some((m) => msg.toLowerCase().includes(m))) {
-      throw new TaskNotFound(msg || "задача не найдена", code);
+      throw new TaskNotFound(msg || "task not found", code);
     }
     throw new KieError(msg || `HTTP ${resp.status}`, code);
   }
@@ -218,7 +215,7 @@ export class KieClient {
         signal: AbortSignal.timeout(120_000),
       });
     } catch (exc) {
-      throw new KieError(`сетевая ошибка: ${exc.message}`);
+      throw new KieError(`network error: ${exc.message}`);
     }
     return KieClient._handle(resp);
   }
@@ -232,17 +229,17 @@ export class KieClient {
         signal: AbortSignal.timeout(60_000),
       });
     } catch (exc) {
-      throw new KieError(`сетевая ошибка: ${exc.message}`);
+      throw new KieError(`network error: ${exc.message}`);
     }
     return KieClient._handle(resp);
   }
 
-  /** Баланс кредитов (GET /api/v1/chat/credit). */
+  /** Account credit balance (GET /api/v1/chat/credit). */
   credits() {
     return this._get("/api/v1/chat/credit");
   }
 
-  /** Загрузка файла (multipart, хост kieai.redpandaai.co) → fileUrl. */
+  /** Upload file (multipart to kieai.redpandaai.co) → returns fileUrl. */
   async upload(filePath, uploadPath = null) {
     if (!uploadPath) uploadPath = guessUploadPath(filePath);
     const name = path.basename(filePath);
@@ -259,24 +256,23 @@ export class KieClient {
         signal: AbortSignal.timeout(300_000),
       });
     } catch (exc) {
-      throw new KieError(`сетевая ошибка при загрузке: ${exc.message}`);
+      throw new KieError(`upload network error: ${exc.message}`);
     }
     const data = await KieClient._handle(resp);
     const url = extractFileUrl(data);
     if (url) return url;
-    throw new KieError(`загрузка файла: неожиданный ответ: ${JSON.stringify(data)}`);
+    throw new KieError(`file upload unexpected response: ${JSON.stringify(data)}`);
   }
 
-  /** Создание задачи генерации. Возвращает taskId. */
+  /** Create generation task. Returns taskId. */
   async create(api, modelId, inputData, callbackUrl = null) {
-    if (!(api in CREATE_ENDPOINTS)) throw new KieError(`неизвестный тип API: ${api}`);
+    if (!(api in CREATE_ENDPOINTS)) throw new KieError(`unknown API type: ${api}`);
     let body;
     if (api === "jobs") {
       body = { model: modelId, input: { ...inputData } };
     } else if (api === "veo" || api === "flux") {
       body = { ...inputData, model: modelId };
     } else {
-      // runway, gpt4o, suno — плоское тело
       body = { ...inputData };
     }
     if (callbackUrl) body.callBackUrl = callbackUrl;
@@ -285,26 +281,26 @@ export class KieClient {
       const taskId = data.taskId || data.task_id || data.id;
       if (taskId) return String(taskId);
     }
-    throw new KieError(`создание задачи: неожиданный ответ: ${JSON.stringify(data)}`);
+    throw new KieError(`task creation unexpected response: ${JSON.stringify(data)}`);
   }
 
-  /** Нормализованный статус задачи (см. normalizeStatus). */
+  /** Normalized task status (see normalizeStatus). */
   async status(api, taskId) {
-    if (!(api in STATUS_ENDPOINTS)) throw new KieError(`неизвестный тип API: ${api}`);
+    if (!(api in STATUS_ENDPOINTS)) throw new KieError(`unknown API type: ${api}`);
     const data = await this._get(STATUS_ENDPOINTS[api], { taskId });
     return normalizeStatus(api, data && typeof data === "object" ? data : {});
   }
 }
 
-/** Скачивает файл по URL в локальный путь dest. */
+/** Download file from url to dest path. */
 export async function downloadFile(url, dest) {
   let resp;
   try {
     resp = await fetch(url, { signal: AbortSignal.timeout(300_000) });
   } catch (exc) {
-    throw new KieError(`скачивание ${url}: ${exc.message}`);
+    throw new KieError(`downloading ${url}: ${exc.message}`);
   }
-  if (!resp.ok) throw new KieError(`скачивание ${url}: HTTP ${resp.status}`);
+  if (!resp.ok) throw new KieError(`downloading ${url}: HTTP ${resp.status}`);
   const buffer = Buffer.from(await resp.arrayBuffer());
   fs.writeFileSync(dest, buffer);
   return dest;

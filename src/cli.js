@@ -1,6 +1,6 @@
 /**
- * KIE Media CLI — инструмент для генерации фото/видео/аудио через KIE API (kie.ai).
- * Парсер аргументов — hand-rolled, ноль зависимостей.
+ * KIE Media CLI — Node.js CLI tool for generating photos, videos, and audio via KIE API (kie.ai).
+ * Argument parser is hand-rolled with zero runtime dependencies.
  */
 
 import fs from "node:fs";
@@ -22,10 +22,10 @@ import { extractInputSchema, formatField } from "./schema.js";
 import { loadModelSchema, mergeModelMeta } from "./schema-cache.js";
 import { runSetup } from "./setup.js";
 
-export const VERSION = "0.3.0";
+export const VERSION = "0.3.1";
 export const CONFIG_PATH = path.join(os.homedir(), ".kie-media", "config.json");
 
-/** Ошибка использования CLI (exit code 2). */
+/** CLI Usage Error (exit code 2). */
 export class UsageError extends Error {
   constructor(msg) {
     super(msg);
@@ -33,7 +33,7 @@ export class UsageError extends Error {
   }
 }
 
-// Заготовка для моделей вне реестра (при явном --api).
+// Default metadata fallback for models outside registry (with explicit --api).
 const GENERIC_MODEL = {
   category: "unknown",
   api: null,
@@ -41,34 +41,26 @@ const GENERIC_MODEL = {
   image_field: "image_url",
   image_list: false,
   required: [],
-  description: "Модель вне реестра.",
+  description: "Model outside registry.",
 };
 
 // ------------------------------------------------------------------ search
-// Вендоры kie.ai называют одну и ту же задачу по-разному: редактирование живёт
-// и в google/nano-banana-edit, и в gpt-image-2-image-to-image, и в
-// ideogram/v3-remix. Без синонимов --search edit теряет больше половины моделей
-// редактирования (все, что названы image-to-image).
 const SEARCH_SYNONYMS = [
-  ["edit", "imagetoimage", "i2i", "img2img", "remix", "inpaint", "редактир", "правк"],
+  ["edit", "imagetoimage", "i2i", "img2img", "remix", "inpaint"],
   ["texttoimage", "t2i", "txt2img"],
-  ["imagetovideo", "i2v", "оживи", "анимац"],
+  ["imagetovideo", "i2v", "animate"],
   ["texttovideo", "t2v"],
-  ["upscale", "апскейл", "увеличен"],
-  ["texttospeech", "tts", "speech", "озвуч", "голос"],
-  ["music", "song", "музык", "песн"],
+  ["upscale"],
+  ["texttospeech", "tts", "speech", "voice"],
+  ["music", "song", "audio"],
 ];
 
-/** Нормализация для сравнения: только буквы и цифры ("nano-banana" ≈ "Nano Banana"). */
+/** Normalization for comparison: lowercase letters and digits only ("nano-banana" ≈ "Nano Banana"). */
 export function squashText(value) {
-  return String(value ?? "").toLowerCase().replace(/[^a-z0-9а-яё]+/g, "");
+  return String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
-/**
- * Запрос → список нормализованных подстрок для матчинга.
- * Кластер подхватывается, если запрос начинается с одного из его терминов:
- * "edits" → "edit", "редактирование" → "редактир".
- */
+/** Expands query into synonyms cluster. */
 export function expandSearchTerms(query) {
   const needle = squashText(query);
   if (!needle) return [];
@@ -81,7 +73,7 @@ export function expandSearchTerms(query) {
   return [...terms];
 }
 
-/** Совпадает ли хотя бы один термин хотя бы с одним из полей записи. */
+/** Matches if at least one term matches at least one target field. */
 export function matchesSearch(terms, ...fields) {
   if (terms.length === 0) return true;
   const haystack = fields.map(squashText).filter(Boolean);
@@ -90,9 +82,9 @@ export function matchesSearch(terms, ...fields) {
 
 // ------------------------------------------------------------------ args
 /**
- * Мини-парсер аргументов.
+ * Lightweight argument parser.
  * spec: { bool: [...], value: [...], multi: [...], alias: { "-o": "--output" } }
- * Возвращает { flags, positionals }.
+ * Returns { flags, positionals }.
  */
 export function parseArgs(argv, spec = {}) {
   const bools = new Set(spec.bool || []);
@@ -116,13 +108,13 @@ export function parseArgs(argv, spec = {}) {
         arg = arg.slice(0, eq);
       }
       if (bools.has(arg)) {
-        if (inlineValue !== null) throw new UsageError(`Флаг ${arg} не принимает значение.`);
+        if (inlineValue !== null) throw new UsageError(`Flag ${arg} does not accept a value.`);
         flags[arg] = true;
       } else if (values.has(arg) || multis.has(arg)) {
         let value = inlineValue;
         if (value === null) {
           value = argv[++i];
-          if (value === undefined) throw new UsageError(`Флаг ${arg} требует значение.`);
+          if (value === undefined) throw new UsageError(`Flag ${arg} requires a value.`);
         }
         if (multis.has(arg)) {
           (flags[arg] = flags[arg] || []).push(value);
@@ -130,7 +122,7 @@ export function parseArgs(argv, spec = {}) {
           flags[arg] = value;
         }
       } else {
-        throw new UsageError(`Неизвестный флаг: ${arg}`);
+        throw new UsageError(`Unknown flag: ${arg}`);
       }
     } else {
       positionals.push(arg);
@@ -140,7 +132,7 @@ export function parseArgs(argv, spec = {}) {
 }
 
 // ------------------------------------------------------------------ helpers
-/** Значение --set: пробуем JSON (true/false/числа/массивы), иначе строка. */
+/** Parse --set value: try JSON (true/false/numbers/arrays), else string. */
 export function parseSetValue(raw) {
   try {
     return JSON.parse(raw);
@@ -153,30 +145,28 @@ function parseSetPairs(pairs) {
   const result = {};
   for (const pair of pairs || []) {
     const eq = pair.indexOf("=");
-    if (eq === -1) throw new UsageError(`--set ожидает формат ключ=значение, получено: ${JSON.stringify(pair)}`);
+    if (eq === -1) throw new UsageError(`--set expects key=value format, got: ${JSON.stringify(pair)}`);
     const key = pair.slice(0, eq).trim();
-    if (!key) throw new UsageError(`--set: пустой ключ в ${JSON.stringify(pair)}`);
+    if (!key) throw new UsageError(`--set: empty key in ${JSON.stringify(pair)}`);
     result[key] = parseSetValue(pair.slice(eq + 1));
   }
   return result;
 }
 
-/** Запись реестра по id модели; для моделей вне реестра нужен --api. */
+/** Resolves model entry from registry by id; models outside registry require --api. */
 export function resolveModel(modelId, apiOverride = null, registryModels = null) {
   const entry = registryModels ? registryModels.get(modelId) : null;
   if (entry) return { ...entry, id: modelId };
   if (apiOverride) return { ...GENERIC_MODEL, api: apiOverride, id: modelId };
   throw new UsageError(
-    `Неизвестная модель: ${JSON.stringify(modelId)}.\n` +
-      "Список моделей: kie models\n" +
-      "Для модели вне реестра укажите тип API: --api jobs|veo|runway|gpt4o|flux|suno"
+    `Unknown model: ${JSON.stringify(modelId)}.\n` +
+      "Model list: kie models\n" +
+      "For model outside registry specify API type: --api jobs|veo|runway|gpt4o|flux|suno"
   );
 }
 
 /**
- * Собирает input модели: --prompt/--image, затем --set, затем --json-input поверх.
- * Чистая функция без сети: локальные пути в images подставляются как есть
- * (загрузка происходит позже, в resolveImages).
+ * Builds input payload: --prompt/--image, then --set, then --json-input on top.
  */
 export function buildInput(model, { prompt = null, images = null, setPairs = null, jsonInputStr = null } = {}) {
   const data = {};
@@ -185,32 +175,28 @@ export function buildInput(model, { prompt = null, images = null, setPairs = nul
     if (promptField) {
       data[promptField] = prompt;
     } else {
-      console.error("Предупреждение: модель не принимает промпт, --prompt проигнорирован.");
+      console.error("Warning: model does not accept prompt, --prompt ignored.");
     }
   }
   if (images && images.length > 0) {
     const imageField = model.image_field;
     if (!imageField) {
-      // У моделей из живого каталога поле картинки не описано в реестре: имя поля
-      // (image_url / image_urls / first_frame_url / …) смотрим в схеме модели.
       throw new UsageError(
-        `Для модели ${model.id || ""} не известно поле изображения, флаг --image не подходит.\n` +
-          `Посмотрите схему:  kie schema ${model.id || "МОДЕЛЬ"}\n` +
-          "и передайте файл или URL в нужное поле: --set ПОЛЕ=ПУТЬ_ИЛИ_URL\n" +
-          "(локальный файл в любом поле CLI загрузит автоматически)"
+        `For model ${model.id || ""} image field is unknown, --image flag is not applicable.\n` +
+          `Inspect schema: kie schema ${model.id || "MODEL"}\n` +
+          "and pass file or URL to the target field: --set FIELD=PATH_OR_URL\n" +
+          "(local file in any field is automatically uploaded by CLI)"
       );
     }
     if (model.image_list) {
       data[imageField] = [...images];
     } else {
       if (images.length > 1) {
-        throw new UsageError(`Поле ${imageField} принимает одно изображение, передано: ${images.length}.`);
+        throw new UsageError(`Field ${imageField} accepts a single image, got: ${images.length}.`);
       }
       data[imageField] = images[0];
     }
   }
-  // Обязательные поля, у которых в схеме есть значение по умолчанию:
-  // без них API отвечает 422, а угадывать их пользователю незачем.
   for (const [field, value] of Object.entries(model.defaults || {})) {
     if (data[field] === undefined) data[field] = value;
   }
@@ -220,10 +206,10 @@ export function buildInput(model, { prompt = null, images = null, setPairs = nul
     try {
       extra = JSON.parse(jsonInputStr);
     } catch (exc) {
-      throw new UsageError(`--json-input: невалидный JSON: ${exc.message}`);
+      throw new UsageError(`--json-input: invalid JSON: ${exc.message}`);
     }
     if (extra === null || typeof extra !== "object" || Array.isArray(extra)) {
-      throw new UsageError("--json-input должен быть JSON-объектом.");
+      throw new UsageError("--json-input must be a JSON object.");
     }
     Object.assign(data, extra);
   }
@@ -231,7 +217,7 @@ export function buildInput(model, { prompt = null, images = null, setPairs = nul
   return data;
 }
 
-/** Проверка обязательных полей ДО запроса к API. */
+/** Pre-flight check of required fields BEFORE API request. */
 export function validateInput(model, data) {
   const missing = [];
   for (const field of model.required || []) {
@@ -244,23 +230,23 @@ export function validateInput(model, data) {
   if (missing.length > 0) {
     const lines = missing.map((field) => {
       let hint;
-      if (field === model.image_field) hint = "--image ФАЙЛ_ИЛИ_URL";
-      else if (field === model.prompt_field) hint = "--prompt ТЕКСТ";
-      else hint = `--set ${field}=ЗНАЧЕНИЕ`;
-      return `  - ${field} (задайте через ${hint})`;
+      if (field === model.image_field) hint = "--image FILE_OR_URL";
+      else if (field === model.prompt_field) hint = "--prompt TEXT";
+      else hint = `--set ${field}=VALUE`;
+      return `  - ${field} (set via ${hint})`;
     });
     const tail = model.id
-      ? `\nВсе поля модели: kie schema ${model.id}`
+      ? `\nInspect model schema: kie schema ${model.id}`
       : "";
-    throw new UsageError("Не заполнены обязательные поля модели:\n" + lines.join("\n") + tail);
+    throw new UsageError("Required model fields are missing:\n" + lines.join("\n") + tail);
   }
   if (model.api === "gpt4o" && !data.prompt && !data.filesUrl) {
-    throw new UsageError("gpt4o-image требует --prompt и/или --image (filesUrl).");
+    throw new UsageError("gpt4o-image requires --prompt and/or --image (filesUrl).");
   }
   if (model.api === "suno" && data.customMode) {
     for (const field of ["style", "title"]) {
       if (!data[field]) {
-        throw new UsageError(`Suno в customMode требует поле '${field}' (--set ${field}=...).`);
+        throw new UsageError(`Suno in customMode requires field '${field}' (--set ${field}=...).`);
       }
     }
   }
@@ -279,18 +265,13 @@ function isLocalFile(value) {
   }
 }
 
-/**
- * Заменяет локальные пути на URL после upload — во ВСЕХ полях input, не только
- * в image_field: у моделей живого каталога файл передаётся через --set
- * (first_frame_url, image_url, reference_image_urls, ...). Промпт не трогаем.
- * Поле image_field строгое: там путь обязан быть файлом или URL.
- */
+/** Resolves local files to URLs via upload for ALL input fields. */
 export async function resolveLocalFiles(client, model, data, log = console.error) {
   const uploaded = new Map();
   const upload = async (filePath) => {
     const key = path.resolve(filePath);
     if (!uploaded.has(key)) {
-      log(`Загрузка файла ${filePath} ...`);
+      log(`Uploading file ${filePath} ...`);
       const url = await client.upload(filePath);
       log(`  -> ${url}`);
       uploaded.set(key, url);
@@ -304,7 +285,7 @@ export async function resolveLocalFiles(client, model, data, log = console.error
     const resolve = async (item) => {
       if (isLocalFile(item)) return upload(item);
       if (strict && typeof item === "string" && !isRemoteRef(item)) {
-        throw new UsageError(`--image: не файл и не URL: ${item}`);
+        throw new UsageError(`--image: not a file or URL: ${item}`);
       }
       return item;
     };
@@ -318,7 +299,7 @@ export async function resolveLocalFiles(client, model, data, log = console.error
   }
 }
 
-/** KIE_API_KEY из env, иначе ~/.kie/config.json. */
+/** KIE_API_KEY from env, else ~/.kie-media/config.json. */
 export function getApiKey() {
   const envKey = (process.env.KIE_API_KEY || "").trim();
   if (envKey) return envKey;
@@ -326,7 +307,7 @@ export function getApiKey() {
     const key = String(JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")).api_key || "").trim();
     if (key) return key;
   } catch {
-    // нет файла или битый JSON
+    // missing file or invalid JSON
   }
   return null;
 }
@@ -341,17 +322,17 @@ function makeClient() {
   const key = getApiKey();
   if (!key) {
     throw new UsageError(
-      "Не найден API-ключ KIE.\n" +
-        "  1) Установите переменную окружения: export KIE_API_KEY=ваш_ключ\n" +
-        "  2) Или сохраните ключ: kie config --set-key ваш_ключ\n" +
-        "  3) Или пройдите мастер настройки: kie setup\n" +
-        "Ключ выдаётся в кабинете https://kie.ai"
+      "KIE API key not found.\n" +
+        "  1) Set environment variable: export KIE_API_KEY=your_key\n" +
+        "  2) Or save key: kie config --set-key your_key\n" +
+        "  3) Or run setup wizard: kie setup\n" +
+        "Get key at https://kie.ai/api-key"
     );
   }
   return new KieClient(key);
 }
 
-/** Каскад jobs → veo → suno → gpt4o → flux → runway, пока задача не найдётся. */
+/** Cascade jobs → veo → suno → gpt4o → flux → runway until task is found. */
 async function detectApi(client, taskId) {
   for (const api of CASCADE_ORDER) {
     try {
@@ -361,26 +342,26 @@ async function detectApi(client, taskId) {
     }
   }
   throw new UsageError(
-    `Задача ${taskId} не найдена ни в одном API. Укажите тип явно: --api ${APIS.join("|")}`
+    `Task ${taskId} not found in any API. Specify type explicitly: --api ${APIS.join("|")}`
   );
 }
 
-/** Polling до терминального статуса. success → статус; fail/timeout → KieError. */
+/** Polling until terminal status. */
 async function pollUntilDone(client, api, taskId, timeoutSec, intervalSec) {
   const deadline = Date.now() + timeoutSec * 1000;
   let lastState = null;
   for (;;) {
     const status = await client.status(api, taskId);
     if (status.state !== lastState) {
-      console.error(`Статус: ${status.state}`);
+      console.error(`Status: ${status.state}`);
       lastState = status.state;
     }
     if (status.state === "success") return status;
-    if (status.state === "fail") throw new KieError(status.fail_msg || "генерация не удалась");
+    if (status.state === "fail") throw new KieError(status.fail_msg || "generation failed");
     if (Date.now() >= deadline) {
       throw new KieError(
-        `таймаут ожидания (${timeoutSec} сек). Задача ещё выполняется — ` +
-          `проверьте позже: kie wait ${taskId}`
+        `wait timeout (${timeoutSec}s). Task is still running — ` +
+          `check status later: kie wait ${taskId}`
       );
     }
     await new Promise((r) => setTimeout(r, intervalSec * 1000));
@@ -396,7 +377,7 @@ function urlFilename(url, fallback) {
   }
 }
 
-/** Скачивает resultUrls в каталог. Возвращает список путей. */
+/** Downloads resultUrls to directory. Returns saved paths. */
 async function downloadResults(urls, directory) {
   fs.mkdirSync(directory, { recursive: true });
   const saved = [];
@@ -407,7 +388,7 @@ async function downloadResults(urls, directory) {
     const base = dest.slice(0, dest.length - ext.length);
     let n = 1;
     while (fs.existsSync(dest)) dest = `${base}_${n++}${ext}`;
-    console.error(`Скачивание ${url} -> ${dest}`);
+    console.error(`Downloading ${url} -> ${dest}`);
     await downloadFile(url, dest);
     saved.push(dest);
   }
@@ -420,38 +401,38 @@ function emit(flags, payload, human) {
 }
 
 function printStatusHuman(status) {
-  console.log(`Состояние: ${status.state}`);
+  console.log(`State: ${status.state}`);
   if (status.progress !== null && status.progress !== undefined) {
-    console.log(`Прогресс: ${status.progress}`);
+    console.log(`Progress: ${status.progress}`);
   }
   if (status.state === "success") {
     if (status.tracks && status.tracks.length > 0) {
       status.tracks.forEach((track, i) => {
-        console.log(`Трек ${i + 1}:`);
+        console.log(`Track ${i + 1}:`);
         if (track.audioUrl) console.log(`  audioUrl:       ${track.audioUrl}`);
         if (track.streamAudioUrl) console.log(`  streamAudioUrl: ${track.streamAudioUrl}`);
       });
     } else if (status.urls && status.urls.length > 0) {
-      console.log("Результаты:");
+      console.log("Results:");
       for (const url of status.urls) console.log(`  ${url}`);
     } else {
-      console.log("URL результата не найдены, сырой ответ:");
+      console.log("Result URLs not found, raw response:");
       console.log(JSON.stringify(status.raw, null, 2));
     }
   } else if (status.state === "fail") {
-    console.log(`Ошибка генерации: ${status.fail_msg}`);
+    console.log(`Generation failed: ${status.fail_msg}`);
   }
 }
 
 function warn(message) {
-  console.error(`Предупреждение: ${message}`);
+  console.error(`Warning: ${message}`);
 }
 
 // ------------------------------------------------------------------ commands
 async function cmdCredits(flags) {
   const client = makeClient();
   const credits = await client.credits();
-  emit(flags, { credits }, () => console.log(`Баланс: ${credits} кредитов`));
+  emit(flags, { credits }, () => console.log(`Balance: ${credits} credits`));
   return 0;
 }
 
@@ -486,18 +467,18 @@ async function cmdModels(flags) {
   };
 
   const human = () => {
-    const date = registry.fetchedAt ? registry.fetchedAt.slice(0, 10) : "встроенный";
-    console.log(`Источник: ${registry.source} (каталог от ${date}), моделей: ${items.length}`);
+    const date = registry.fetchedAt ? registry.fetchedAt.slice(0, 10) : "built-in";
+    console.log(`Source: ${registry.source} (catalog from ${date}), models: ${items.length}`);
     if (items.length === 0) {
-      console.log("Модели не найдены.");
+      console.log("Models not found.");
       return;
     }
     for (const [id, m] of items) {
       const required = (m.required && m.required.length > 0) ? m.required.join(", ") : "—";
-      const stale = m.stale ? "  [stale: нет в живом каталоге]" : "";
-      console.log(`${id}  [${m.category}/${m.api}]  обязательные: ${required}${stale}`);
+      const stale = m.stale ? "  [stale: not in live catalog]" : "";
+      console.log(`${id}  [${m.category}/${m.api}]  required: ${required}${stale}`);
       if (m.description) console.log(`    ${m.description}`);
-      if (m.docUrl) console.log(`    схема input: kie schema ${id}  (${m.docUrl})`);
+      if (m.docUrl) console.log(`    input schema: kie schema ${id}  (${m.docUrl})`);
     }
   };
   emit(flags, payload, human);
@@ -509,7 +490,7 @@ function formatUsd(value) {
 }
 
 function formatPriceRange(pricing) {
-  if (!pricing) return "цена неизвестна";
+  if (!pricing) return "price unknown";
   const credits = pricing.creditsMin === pricing.creditsMax
     ? `${pricing.creditsMin}`
     : `${pricing.creditsMin}–${pricing.creditsMax}`;
@@ -518,7 +499,7 @@ function formatPriceRange(pricing) {
     : `${formatUsd(pricing.usdMin)}–${formatUsd(pricing.usdMax)}`;
   const units = pricing.units.length > 0 ? ` ${pricing.units.join("/")}` : "";
   const approx = pricing.approximate ? "≈" : "";
-  return `${approx}${credits} кредитов${units} (~${usd})`;
+  return `${approx}${credits} credits${units} (~${usd})`;
 }
 
 async function cmdPricing(flags) {
@@ -541,13 +522,13 @@ async function cmdPricing(flags) {
   };
   const human = () => {
     const date = pricing.fetchedAt ? pricing.fetchedAt.slice(0, 10) : "—";
-    console.log(`Источник: ${pricing.source} (прайс от ${date}), записей: ${records.length}`);
+    console.log(`Source: ${pricing.source} (pricing from ${date}), records: ${records.length}`);
     if (records.length === 0) {
-      console.log("Записи не найдены. Попробуйте: kie pricing --refresh");
+      console.log("Records not found. Try: kie pricing --refresh");
       return;
     }
     for (const r of records) {
-      console.log(`${r.id || r.description}  [${r.category}]  ${r.credits} кредитов ${r.unit} (~${formatUsd(r.usd)})`);
+      console.log(`${r.id || r.description}  [${r.category}]  ${r.credits} credits ${r.unit} (~${formatUsd(r.usd)})`);
       if (r.id && r.description) console.log(`    ${r.description}`);
     }
   };
@@ -556,15 +537,15 @@ async function cmdPricing(flags) {
 }
 
 const TIER_LABELS = {
-  quality: "максимальное качество",
-  balanced: "баланс цена/качество",
-  budget: "бюджетно, для объёма",
+  quality: "maximum quality",
+  balanced: "price/quality balance",
+  budget: "budget, for volume",
 };
 
 async function cmdRecommend(flags, positionals) {
   const category = positionals[0];
   if (!category || !CATEGORIES.includes(category)) {
-    throw new UsageError(`Укажите категорию: kie recommend ${CATEGORIES.join("|")}`);
+    throw new UsageError(`Specify category: kie recommend ${CATEGORIES.join("|")}`);
   }
   const registry = await loadRegistry({
     refresh: Boolean(flags["--refresh"]),
@@ -585,32 +566,26 @@ async function cmdRecommend(flags, positionals) {
   };
   const human = () => {
     if (options.length === 0) {
-      console.log(`Моделей категории ${category} не найдено. Обновите каталог: kie models --refresh`);
+      console.log(`No models found for category ${category}. Refresh catalog: kie models --refresh`);
       return;
     }
-    console.log(`Рекомендуемые модели (${category}) — последняя версия каждого популярного семейства:`);
+    console.log(`Recommended models (${category}) — latest version of each popular family:`);
     options.forEach((option, i) => {
       const tier = option.tier ? `  [${TIER_LABELS[option.tier]}]` : "";
       console.log(`${i + 1}. ${option.model}${tier}`);
       console.log(`   ${formatPriceRange(option.pricing)}`);
       if (option.description) console.log(`   ${option.description}`);
     });
-    console.log("\nЗапуск: kie run МОДЕЛЬ --prompt ... --wait --download ./out --json");
+    console.log("\nRun: kie run MODEL --prompt ... --wait --download ./out --json");
   };
   emit(flags, payload, human);
   return 0;
 }
 
-/** Предполагаемый адрес страницы модели в market-каталоге (для моделей вне реестра). */
 function guessDocUrl(modelId) {
   return `https://docs.kie.ai/market/${modelId}.md`;
 }
 
-/**
- * Дополняет запись реестра метаданными из живой схемы модели (кэш 24ч).
- * Это то, что позволяет новой модели каталога работать без обновления CLI:
- * поля промпта/изображения, обязательные поля и их дефолты берутся из документации.
- */
 async function withLiveSchema(model, modelId, flags) {
   if (flags["--no-schema"]) return model;
   const docUrl = model.docUrl || guessDocUrl(modelId);
@@ -618,8 +593,8 @@ async function withLiveSchema(model, modelId, flags) {
   if (!schema) {
     if (model.dynamic || !model.docUrl) {
       warn(
-        `схема модели ${modelId} недоступна — поля не проверены. ` +
-          "Если API вернёт 422, сверьтесь с документацией: kie schema " + modelId
+        `schema for model ${modelId} unavailable — fields unverified. ` +
+          "If API returns 422, check documentation: kie schema " + modelId
       );
     }
     return model;
@@ -629,21 +604,21 @@ async function withLiveSchema(model, modelId, flags) {
 
 async function cmdSchema(flags, positionals) {
   const modelId = positionals[0];
-  if (!modelId) throw new UsageError("Укажите модель: kie schema МОДЕЛЬ");
+  if (!modelId) throw new UsageError("Specify model: kie schema MODEL");
   const registry = await loadRegistry({ allowFetch: true, onWarning: warn });
   const entry = registry.models.get(modelId);
   if (!entry) {
     throw new UsageError(
-      `Неизвестная модель: ${JSON.stringify(modelId)}.\n` +
-        `Поиск: kie models --search ${modelId.split("/").pop()}`
+      `Unknown model: ${JSON.stringify(modelId)}.\n` +
+        `Search: kie models --search ${modelId.split("/").pop()}`
     );
   }
   const docUrl = entry.docUrl || null;
   if (!docUrl) {
     throw new UsageError(
-      `Для модели ${modelId} нет страницы в живом каталоге docs.kie.ai` +
-        (entry.stale ? " (модель помечена stale — вероятно, снята с публикации)." : ".") +
-        "\nОбновите каталог: kie models --refresh"
+      `Model ${modelId} has no page in live docs.kie.ai catalog` +
+        (entry.stale ? " (model marked stale — likely unlisted)." : ".") +
+        "\nRefresh catalog: kie models --refresh"
     );
   }
 
@@ -651,7 +626,7 @@ async function cmdSchema(flags, positionals) {
   try {
     markdown = await fetchDoc(docUrl);
   } catch (exc) {
-    throw new KieError(`не удалось скачать ${docUrl}: ${exc.message}`);
+    throw new KieError(`failed to download ${docUrl}: ${exc.message}`);
   }
   const { fields, block } = extractInputSchema(markdown);
 
@@ -667,10 +642,10 @@ async function cmdSchema(flags, positionals) {
   const human = () => {
     console.log(`${modelId}  [${entry.category}/${entry.api}]  ${docUrl}`);
     if (fields.length === 0) {
-      console.log("Не удалось разобрать схему — откройте страницу документации выше.");
+      console.log("Failed to parse schema — open documentation page above.");
       return;
     }
-    console.log("Поля input (* — обязательное):");
+    console.log("Input fields (* = required):");
     const width = Math.max(...fields.map((f) => f.name.length));
     for (const field of fields) {
       const name = (field.name + (field.required ? "*" : "")).padEnd(width + 1);
@@ -678,8 +653,8 @@ async function cmdSchema(flags, positionals) {
       console.log(`  ${name}  ${meta}`);
       if (field.description) console.log(`      ${field.description.slice(0, 300)}`);
     }
-    console.log("\nПередача значений: --set ПОЛЕ=ЗНАЧЕНИЕ (JSON или строка), файлы — путь или URL.");
-    if (flags["--raw"] && block) console.log(`\n--- сырой YAML схемы ---\n${block}`);
+    console.log("\nPassing values: --set FIELD=VALUE (JSON or string), files as path or URL.");
+    if (flags["--raw"] && block) console.log(`\n--- raw YAML schema ---\n${block}`);
   };
   emit(flags, payload, human);
   return 0;
@@ -687,9 +662,9 @@ async function cmdSchema(flags, positionals) {
 
 async function cmdUpload(flags, positionals) {
   const file = positionals[0];
-  if (!file) throw new UsageError("Укажите файл: kie upload ФАЙЛ");
+  if (!file) throw new UsageError("Specify file: kie upload FILE");
   if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
-    throw new UsageError(`Файл не найден: ${file}`);
+    throw new UsageError(`File not found: ${file}`);
   }
   const client = makeClient();
   const url = await client.upload(file);
@@ -699,10 +674,8 @@ async function cmdUpload(flags, positionals) {
 
 async function cmdRun(flags, positionals) {
   const modelId = positionals[0];
-  if (!modelId) throw new UsageError("Укажите модель: kie run МОДЕЛЬ [--prompt ...]");
-  // Без сети на каждый запуск: только кэш/seed (allowFetch: false).
+  if (!modelId) throw new UsageError("Specify model: kie run MODEL [--prompt ...]");
   let registry = await loadRegistry({ allowFetch: false, onWarning: warn });
-  // Модели нет в кэше — возможно, она появилась в каталоге только что: обновляемся.
   if (!registry.models.has(modelId) && !flags["--api"]) {
     registry = await loadRegistry({ refresh: true, allowFetch: true, onWarning: warn });
   }
@@ -714,7 +687,7 @@ async function cmdRun(flags, positionals) {
     setPairs: flags["--set"],
     jsonInputStr: flags["--json-input"],
   });
-  validateInput(model, data); // до любых сетевых вызовов
+  validateInput(model, data);
 
   if (flags["--dry-run"]) {
     const payload = {
@@ -728,9 +701,9 @@ async function cmdRun(flags, positionals) {
         .map(([field, value]) => ({ field, file: value })),
     };
     emit(flags, payload, () => {
-      console.log(`${modelId} (api: ${model.api}) — запрос не отправлен (--dry-run)`);
+      console.log(`${modelId} (api: ${model.api}) — request not sent (--dry-run)`);
       console.log(JSON.stringify(data, null, 2));
-      for (const u of payload.uploads) console.log(`Будет загружен: ${u.file} → ${u.field}`);
+      for (const u of payload.uploads) console.log(`Will be uploaded: ${u.file} -> ${u.field}`);
     });
     return 0;
   }
@@ -743,11 +716,11 @@ async function cmdRun(flags, positionals) {
   const payload = { taskId, model: modelId, api: model.api };
 
   const humanCreated = () => {
-    console.log("Задача создана.");
+    console.log("Task created.");
     console.log(`  taskId: ${taskId}`);
-    console.log(`  модель: ${modelId} (api: ${model.api})`);
-    console.log(`Проверить статус:     kie status ${taskId}`);
-    console.log(`Дождаться результата: kie wait ${taskId}  (или kie generate wait ${taskId})`);
+    console.log(`  model:  ${modelId} (api: ${model.api})`);
+    console.log(`Check status:   kie status ${taskId}`);
+    console.log(`Wait for result: kie wait ${taskId}  (or kie generate wait ${taskId})`);
   };
 
   if (!flags["--wait"]) {
@@ -770,7 +743,7 @@ async function cmdRun(flags, positionals) {
 
   const humanDone = () => {
     printStatusHuman(status);
-    for (const file of payload.files || []) console.log(`Сохранено: ${file}`);
+    for (const file of payload.files || []) console.log(`Saved: ${file}`);
   };
   emit(flags, payload, humanDone);
   return 0;
@@ -778,7 +751,7 @@ async function cmdRun(flags, positionals) {
 
 async function cmdStatus(flags, positionals) {
   const taskId = positionals[0];
-  if (!taskId) throw new UsageError("Укажите taskId: kie status TASK_ID");
+  if (!taskId) throw new UsageError("Specify taskId: kie status TASK_ID");
   const client = makeClient();
   let status;
   if (flags["--api"]) {
@@ -786,7 +759,7 @@ async function cmdStatus(flags, positionals) {
   } else {
     const detected = await detectApi(client, taskId);
     status = detected.status;
-    if (!flags["--json"]) console.error(`API: ${detected.api} (определён автоматически)`);
+    if (!flags["--json"]) console.error(`API: ${detected.api} (auto-detected)`);
   }
   emit(flags, status, () => printStatusHuman(status));
   return status.state === "fail" ? 1 : 0;
@@ -794,13 +767,13 @@ async function cmdStatus(flags, positionals) {
 
 async function cmdWait(flags, positionals) {
   const taskId = positionals[0];
-  if (!taskId) throw new UsageError("Укажите taskId: kie wait TASK_ID  (или kie generate wait TASK_ID)");
+  if (!taskId) throw new UsageError("Specify taskId: kie wait TASK_ID  (or kie generate wait TASK_ID)");
   const client = makeClient();
   let api = flags["--api"];
   if (!api) {
     const detected = await detectApi(client, taskId);
     api = detected.api;
-    if (!flags["--json"]) console.error(`API: ${api} (определён автоматически)`);
+    if (!flags["--json"]) console.error(`API: ${api} (auto-detected)`);
   }
   const timeout = parseDuration(flags["--timeout"] ?? flags["--wait-timeout"] ?? 600, 600);
   const interval = parseDuration(flags["--interval"] ?? flags["--wait-interval"] ?? 5, 5);
@@ -811,128 +784,127 @@ async function cmdWait(flags, positionals) {
 
 async function cmdDownload(flags, positionals) {
   const url = positionals[0];
-  if (!url) throw new UsageError("Укажите URL: kie download URL [-o ПУТЬ]");
+  if (!url) throw new UsageError("Specify URL: kie download URL [-o PATH]");
   let dest = flags["--output"];
   if (!dest) dest = urlFilename(url, "download");
   if (fs.existsSync(dest) && fs.statSync(dest).isDirectory()) {
     dest = path.join(dest, urlFilename(url, "download"));
   }
   await downloadFile(url, dest);
-  emit(flags, { file: dest }, () => console.log(`Сохранено: ${dest}`));
+  emit(flags, { file: dest }, () => console.log(`Saved: ${dest}`));
   return 0;
 }
 
 function cmdConfig(flags) {
   const key = flags["--set-key"];
-  if (!key) throw new UsageError("Укажите ключ: kie config --set-key ВАШ_КЛЮЧ");
+  if (!key) throw new UsageError("Specify key: kie config --set-key YOUR_KEY");
   saveApiKey(key);
-  emit(flags, { config: CONFIG_PATH }, () => console.log(`Ключ сохранён в ${CONFIG_PATH}`));
+  emit(flags, { config: CONFIG_PATH }, () => console.log(`Key saved to ${CONFIG_PATH}`));
   return 0;
 }
 
 // ------------------------------------------------------------------ help
-const HELP = `kie-media-cli ${VERSION} — генерация фото/видео/аудио через KIE API (kie.ai).
+const HELP = `kie-media-cli ${VERSION} — photo/video/audio generation via KIE API (kie.ai).
 
-Использование: kie <команда> [флаги]
+Usage: kie <command> [flags]
 
-Команды:
-  setup        мастер первичной настройки (ключ + скилл агента), alias: init
-                 флаги: --yes (неинтерактивно), --local (скилл из пакета), --repo РЕПО
-  credits      баланс кредитов
-  models       реестр моделей (живой каталог docs.kie.ai, кэш 24ч)
-                 флаги: --refresh, --category image|video|audio, --search ТЕКСТ
-                 алиасы: --image/--video/--audio
-  pricing      цены моделей в кредитах и $ (kie.ai/pricing, кэш 24ч)
-                 флаги: --refresh, --category image|video|audio, --search ТЕКСТ
-               --search понимает синонимы задач: edit = image-to-image = i2i =
-               remix, tts = озвучка, upscale = апскейл; дефисы и регистр не важны
-  recommend    подбор модели под категорию: последняя версия каждого
-    КАТЕГОРИЯ    популярного семейства с ценами и тиром качества
-                 (image|video|audio), флаги: --refresh
-  schema МОДЕЛЬ поля input модели из её документации (--raw — сырой YAML)
-  upload ФАЙЛ  загрузить локальный файл, напечатать fileUrl
-  run МОДЕЛЬ   создать задачу генерации
-                 --prompt ТЕКСТ        промпт (кладётся в prompt_field модели)
-                 --image ФАЙЛ_ИЛИ_URL  изображение; можно несколько раз
-                 --set КЛЮЧ=ЗНАЧЕНИЕ   поле input; значение парсится как JSON
-                                       (локальный файл в любом поле загружается сам)
-                 --json-input 'JSON'   сырой JSON-объект поверх собранного input
-                 --api ТИП             jobs|veo|runway|gpt4o|flux|suno (для моделей вне реестра)
-                 --dry-run             показать итоговый input и не отправлять запрос
-                 --no-schema           не подтягивать схему модели из документации
-                 --refresh-schema      обновить кэш схемы модели
-                 --wait                дождаться результата (polling)
-                 --timeout СЕК         таймаут --wait (по умолч. 600, понимает 10m/600s)
-                 --interval СЕК        интервал polling (по умолч. 5, понимает 3s)
-                 --download КАТАЛОГ    скачать результаты (с --wait)
-  cost МОДЕЛЬ  оценка стоимости без создания задачи
-                 флаги как у run (без --wait/--download), + --json
-  status ID    статус задачи; без --api — автоперебор: ${CASCADE_ORDER.join(" → ")}
-  wait ID      дождаться завершения задачи (--timeout 600 --interval 5, понимает 10m/3s)
-  download URL скачать файл (-o ПУТЬ)
-  config       сохранить ключ: --set-key KEY
+Commands:
+  setup        interactive setup wizard (API key + agent skill), alias: init
+                 flags: --yes (non-interactive), --local (skill from package), --repo REPO
+  credits      display credit balance
+  models       model registry (live catalog from docs.kie.ai, cached 24h)
+                 flags: --refresh, --category image|video|audio, --search TEXT
+                 aliases: --image/--video/--audio
+  pricing      model pricing in credits and USD (kie.ai/pricing, cached 24h)
+                 flags: --refresh, --category image|video|audio, --search TEXT
+               --search supports task synonyms: edit = image-to-image = i2i =
+               remix, tts = speech, upscale; hyphens and case ignored
+  recommend    recommend models by category: latest version of each
+    CATEGORY     popular family with pricing and quality tier
+                 (image|video|audio), flags: --refresh
+  schema MODEL input fields for model from documentation (--raw — raw YAML)
+  upload FILE  upload local file, print fileUrl
+  run MODEL    create generation task
+                 --prompt TEXT        prompt text (mapped to prompt_field)
+                 --image FILE_OR_URL  image input; can be repeated
+                 --set KEY=VALUE      input field; value parsed as JSON
+                                      (local files auto-uploaded)
+                 --json-input 'JSON'  raw JSON object merged on top of input
+                 --api TYPE           jobs|veo|runway|gpt4o|flux|suno (for models outside registry)
+                 --dry-run            show generated input without sending request
+                 --no-schema          skip fetching live schema
+                 --refresh-schema     refresh model schema cache
+                 --wait               wait for task completion (polling)
+                 --timeout SEC        --wait timeout (default 600, accepts 10m/600s)
+                 --interval SEC       polling interval (default 5, accepts 3s)
+                 --download DIR       download result files (with --wait)
+  cost MODEL   estimate cost without creating task
+                 flags same as run (without --wait/--download), + --json
+  status ID    check task status; without --api — auto-detect: ${CASCADE_ORDER.join(" → ")}
+  wait ID      wait for task completion (--timeout 600 --interval 5, accepts 10m/3s)
+  download URL download file (-o PATH)
+  config       save API key: --set-key KEY
 
-Иерархические аліасы команд:
+Hierarchical Command Aliases:
   model list [--image|--video|--audio] [--json]  → models
-  model get <модель> [--json|--raw]              → schema
-  generate create <модель> [флаги run]           → run
-  generate cost <модель> [флаги]                 → cost
-  generate list [--json]                         → история последних задач
+  model get <model> [--json|--raw]               → schema
+  generate create <model> [run flags]            → run
+  generate cost <model> [flags]                  → cost
+  generate list [--json]                         → task history
   generate get <id> [--json]                     → status
   generate wait <id> [--json]                    → wait
-  workflow list / workflow get <name>            → список воркфлоу KIE
+  workflow list / workflow get <name>            → KIE workflow patterns
 
-Общий флаг: --json — машинный вывод в JSON.
-Ключ API: env KIE_API_KEY или ${CONFIG_PATH}`;
+Global Flag: --json — machine-readable JSON output.
+API Key: env KIE_API_KEY or ${CONFIG_PATH}`;
 
-// helpers — парсинг таймаутов (10m, 3s, 600)
 export function parseDuration(value, fallback) {
   if (value === undefined || value === null || value === "") return fallback;
   const s = String(value).trim();
   const m = s.match(/^(\d+(?:\.\d+)?)(m|s)?$/);
-  if (!m) throw new UsageError(`Неверный формат времени: ${value} (пример: 600, 10m, 30s)`);
+  if (!m) throw new UsageError(`Invalid duration format: ${value} (example: 600, 10m, 30s)`);
   const n = parseFloat(m[1]);
   const unit = m[2] || "s";
   return unit === "m" ? Math.round(n * 60) : Math.round(n);
 }
 
-// ------------------------------------------------------------------ workflows stub
+// ------------------------------------------------------------------ workflows
 const WORKFLOWS = [
   {
     name: "image-to-video",
-    description: "Анимация изображения в видео (veo/seedance): --image → видео",
+    description: "Animate image to video (veo/seedance): --image → video",
     params: ["--prompt", "--image", "--set", "--api", "--wait"],
-    example: "kie run veo3_fast --prompt 'кот машет лапой' --image ./cat.png --wait --download ./out",
+    example: "kie run veo3_fast --prompt 'cat waving hand' --image ./cat.png --wait --download ./out",
   },
   {
     name: "image-edit",
-    description: "Редактирование изображения по промпту (nano-banana-edit, flux-kontext)",
+    description: "Prompt-based image editing (nano-banana-edit, flux-kontext)",
     params: ["--prompt", "--image", "--set", "--wait"],
-    example: "kie run google/nano-banana-edit --prompt 'замени фон на лес' --image ./photo.png --wait",
+    example: "kie run google/nano-banana-edit --prompt 'change background to forest' --image ./photo.png --wait",
   },
   {
     name: "upscale",
-    description: "Апскейл изображения (topaz/image-upscale и др.)",
+    description: "Image upscaling (topaz/image-upscale, etc.)",
     params: ["--image", "--set", "--wait"],
     example: "kie run topaz/image-upscale --image ./photo.png --wait --download ./out",
   },
   {
     name: "text-to-speech",
-    description: "Озвучка текста (elevenlabs, suno TTS)",
+    description: "Text-to-speech voiceover (elevenlabs, suno TTS)",
     params: ["--prompt", "--set", "--wait"],
-    example: "kie run elevenlabs/text-to-speech-turbo-2-5 --prompt 'Привет!' --wait --download ./out",
+    example: "kie run elevenlabs/text-to-speech-turbo-2-5 --prompt 'Hello world' --wait --download ./out",
   },
 ];
 
 async function cmdWorkflowList(flags) {
   const payload = { workflows: WORKFLOWS };
   const human = () => {
-    console.log("Воркфлоу KIE (паттерны использования моделей):");
+    console.log("KIE Workflows (common usage patterns):");
     for (const w of WORKFLOWS) {
       console.log(`  ${w.name} — ${w.description}`);
-      console.log(`    пример: ${w.example}`);
+      console.log(`    example: ${w.example}`);
     }
-    console.log("\nДетали: kie workflow get <name> --json");
+    console.log("\nDetails: kie workflow get <name> --json");
   };
   emit(flags, payload, human);
   return 0;
@@ -940,14 +912,14 @@ async function cmdWorkflowList(flags) {
 
 async function cmdWorkflowGet(flags, positionals) {
   const name = positionals[0];
-  if (!name) throw new UsageError("Укажите воркфлоу: kie workflow get <name>  (список: kie workflow list)");
+  if (!name) throw new UsageError("Specify workflow: kie workflow get <name>  (list: kie workflow list)");
   const wf = WORKFLOWS.find((w) => w.name === name);
-  if (!wf) throw new UsageError(`Неизвестный воркфлоу: ${name}. Список: kie workflow list`);
+  if (!wf) throw new UsageError(`Unknown workflow: ${name}. List: kie workflow list`);
   const payload = wf;
   const human = () => {
     console.log(`${wf.name} — ${wf.description}`);
-    console.log(`Параметры: ${wf.params.join(", ")}`);
-    console.log(`Пример: ${wf.example}`);
+    console.log(`Params: ${wf.params.join(", ")}`);
+    console.log(`Example: ${wf.example}`);
   };
   emit(flags, payload, human);
   return 0;
@@ -974,18 +946,17 @@ async function cmdHistoryList(flags) {
   const list = loadHistory().slice(0, limit);
   const payload = { count: list.length, jobs: list };
   const human = () => {
-    if (list.length === 0) { console.log("История пуста. Запустите: kie run <модель> --prompt ..."); return; }
-    console.log(`Последние задачи: ${list.length}`);
+    if (list.length === 0) { console.log("History is empty. Run: kie run <model> --prompt ..."); return; }
+    console.log(`Recent tasks: ${list.length}`);
     for (const j of list) console.log(`  ${j.taskId}  ${j.model} [${j.api}] ${j.timestamp}`);
   };
   emit(flags, payload, human);
   return 0;
 }
 
-// cost — оценка без создания задачи
 async function cmdCost(flags, positionals) {
   const modelId = positionals[0];
-  if (!modelId) throw new UsageError("Укажите модель: kie cost <модель> [--prompt ...] [--image ...] [--set k=v]");
+  if (!modelId) throw new UsageError("Specify model: kie cost <model> [--prompt ...] [--image ...] [--set k=v]");
   let registry = await loadRegistry({ allowFetch: false, onWarning: warn });
   if (!registry.models.has(modelId) && !flags["--api"]) {
     registry = await loadRegistry({ refresh: true, allowFetch: true, onWarning: warn });
@@ -1000,7 +971,6 @@ async function cmdCost(flags, positionals) {
   });
   validateInput(model, data);
   const pricing = await loadPricing({ allowFetch: true, onWarning: warn, refresh: Boolean(flags["--refresh"]) });
-  // найти точную запись прайса или approximate по описанию
   let records = pricing.records.filter((r) => r.id === modelId);
   let approximate = false;
   if (records.length === 0) {
@@ -1025,20 +995,20 @@ async function cmdCost(flags, positionals) {
     pricingSource: pricing.source,
     fetchedAt: pricing.fetchedAt,
   };
-  if (!pricingInfo) payload.note = "Цена не найдена в прайсе kie.ai — проверьте: kie pricing --search " + modelId;
+  if (!pricingInfo) payload.note = "Price not found in kie.ai pricing list — check: kie pricing --search " + modelId;
   const human = () => {
     console.log(`${modelId} [${model.api}/${model.category}]`);
     if (pricingInfo) {
       const approx = approximate ? "≈" : "";
-      console.log(`Оценка: ${approx}${pricingInfo.credits} кредитов / ${pricingInfo.unit} (~${formatUsd(pricingInfo.usd)})${approximate ? " (приблизительно по описанию)" : ""}`);
+      console.log(`Estimated cost: ${approx}${pricingInfo.credits} credits / ${pricingInfo.unit} (~${formatUsd(pricingInfo.usd)})${approximate ? " (approximate by description)" : ""}`);
       if (pricingInfo.description) console.log(`  ${pricingInfo.description}`);
     } else {
-      console.log("Цена не найдена. Попробуйте: kie pricing --search " + modelId + " --refresh");
+      console.log("Price not found. Try: kie pricing --search " + modelId + " --refresh");
     }
-    console.log(`Источник прайса: ${pricing.source} (${pricing.fetchedAt ? pricing.fetchedAt.slice(0,10) : "—"})`);
-    if (approximate) console.log("≈ — цена подобрана по описанию, не по точному id");
-    console.log("Собраний input:", JSON.stringify(data, null, 2));
-    console.log("Запуск: kie run " + modelId + " --prompt ... --wait (для реального создания задачи)");
+    console.log(`Pricing source: ${pricing.source} (${pricing.fetchedAt ? pricing.fetchedAt.slice(0,10) : "—"})`);
+    if (approximate) console.log("≈ — matched by description keywords, not exact ID");
+    console.log("Collected input:", JSON.stringify(data, null, 2));
+    console.log("Run: kie run " + modelId + " --prompt ... --wait (for actual task creation)");
   };
   emit(flags, payload, human);
   return 0;
@@ -1095,7 +1065,7 @@ const COMMAND_SPECS = {
       const sub = pos[0];
       if (!sub || sub === "list") return cmdWorkflowList(flags);
       if (sub === "get") return cmdWorkflowGet(flags, pos.slice(1));
-      throw new UsageError(`workflow: неизвестная подкоманда ${JSON.stringify(sub)} (list|get)`);
+      throw new UsageError(`workflow: unknown subcommand ${JSON.stringify(sub)} (list|get)`);
     },
   },
   model: {
@@ -1111,15 +1081,14 @@ const COMMAND_SPECS = {
         return cmdModels(flags, pos);
       }
       if (sub === "get") return cmdSchema(flags, pos.slice(1));
-      throw new UsageError(`model: используйте model list | model get <модель>`);
+      throw new UsageError(`model: use model list | model get <model>`);
     },
   },
   generate: {
     bool: ["--json"],
     value: [],
-    handler: async (flags, pos) => {
-      // этот handler не используется напрямую — логика в main() для поддержки флагов подкоманд
-      throw new UsageError("generate: используйте generate create|cost|list|get|wait|workflow");
+    handler: async () => {
+      throw new UsageError("generate: use generate create|cost|list|get|wait|workflow");
     },
   },
 };
@@ -1135,13 +1104,11 @@ export async function main(argv = process.argv.slice(2)) {
   }
   const [command, ...rest] = argv;
 
-  // --- Иерархические команды (generate/model) ---
-  // Они требуют проброса флагов подкоманд, поэтому парсим вручную, не через COMMAND_SPECS
   if (command === "generate") {
     try {
       const sub = rest[0];
       const subRest = rest.slice(1);
-      if (!sub) throw new UsageError("generate: укажите подкоманду create|cost|list|get|wait|workflow");
+      if (!sub) throw new UsageError("generate: specify subcommand create|cost|list|get|wait|workflow");
       if (sub === "create") {
         const spec = COMMAND_SPECS.run;
         const { flags, positionals } = parseArgs(subRest, spec);
@@ -1182,12 +1149,12 @@ export async function main(argv = process.argv.slice(2)) {
           const { flags } = parseArgs(wfRest.slice(1), spec);
           return (await cmdWorkflowGet(flags, [wfRest[0]])) || 0;
         }
-        throw new UsageError(`generate workflow: неизвестный воркфлоу ${JSON.stringify(wf)} (попробуйте: kie workflow list)`);
+        throw new UsageError(`generate workflow: unknown workflow ${JSON.stringify(wf)} (try: kie workflow list)`);
       }
-      throw new UsageError(`generate: неизвестная подкоманда ${JSON.stringify(sub)} (create|cost|list|get|wait|workflow)`);
+      throw new UsageError(`generate: unknown subcommand ${JSON.stringify(sub)} (create|cost|list|get|wait|workflow)`);
     } catch (exc) {
-      if (exc instanceof UsageError) { console.error(`Ошибка: ${exc.message}`); return 2; }
-      if (exc instanceof TaskNotFound) { console.error(`Задача не найдена: ${exc.msg}`); return 1; }
+      if (exc instanceof UsageError) { console.error(`Error: ${exc.message}`); return 2; }
+      if (exc instanceof TaskNotFound) { console.error(`Task not found: ${exc.msg}`); return 1; }
       if (exc instanceof KieError) { console.error(exc.message); return 1; }
       throw exc;
     }
@@ -1208,15 +1175,13 @@ export async function main(argv = process.argv.slice(2)) {
       if (sub === "get") {
         const spec = { bool: ["--json", "--raw"] };
         const { flags, positionals } = parseArgs(subRest, spec);
-        // model get <id> → schema <id>
-        if (positionals.length === 0) throw new UsageError("Укажите модель: kie model get <модель>");
-        // переиспользуем cmdSchema: positionals[0] = modelId
+        if (positionals.length === 0) throw new UsageError("Specify model: kie model get <model>");
         return (await cmdSchema(flags, positionals)) || 0;
       }
-      throw new UsageError(`model: используйте model list | model get <модель>`);
+      throw new UsageError(`model: use model list | model get <model>`);
     } catch (exc) {
-      if (exc instanceof UsageError) { console.error(`Ошибка: ${exc.message}`); return 2; }
-      if (exc instanceof TaskNotFound) { console.error(`Задача не найдена: ${exc.msg}`); return 1; }
+      if (exc instanceof UsageError) { console.error(`Error: ${exc.message}`); return 2; }
+      if (exc instanceof TaskNotFound) { console.error(`Task not found: ${exc.msg}`); return 1; }
       if (exc instanceof KieError) { console.error(exc.message); return 1; }
       throw exc;
     }
@@ -1224,7 +1189,7 @@ export async function main(argv = process.argv.slice(2)) {
 
   const spec = COMMAND_SPECS[command];
   if (!spec) {
-    console.error(`Ошибка: неизвестная команда: ${command}\n`);
+    console.error(`Error: unknown command: ${command}\n`);
     console.error(HELP);
     return 2;
   }
@@ -1233,11 +1198,11 @@ export async function main(argv = process.argv.slice(2)) {
     return (await spec.handler(flags, positionals)) || 0;
   } catch (exc) {
     if (exc instanceof UsageError) {
-      console.error(`Ошибка: ${exc.message}`);
+      console.error(`Error: ${exc.message}`);
       return 2;
     }
     if (exc instanceof TaskNotFound) {
-      console.error(`Задача не найдена: ${exc.msg}`);
+      console.error(`Task not found: ${exc.msg}`);
       return 1;
     }
     if (exc instanceof KieError) {

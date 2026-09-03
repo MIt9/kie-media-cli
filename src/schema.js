@@ -1,9 +1,6 @@
 /**
- * Разбор market-страницы docs.kie.ai (.md с встроенной OpenAPI-спекой в YAML)
- * → список полей объекта input конкретной модели.
- *
- * Полноценный YAML-парсер не нужен и намеренно не подключается (ноль зависимостей):
- * страницы каталога однородны, достаточно разбора по отступам.
+ * Parses market page from docs.kie.ai (.md with embedded OpenAPI spec in YAML)
+ * → list of input object fields for a model.
  */
 
 const SCALAR_KEYS = [
@@ -22,7 +19,6 @@ function indentOf(line) {
   return line.length - line.trimStart().length;
 }
 
-/** Строки блока, вложенного в строку с индексом start (отступ строго больше). */
 function blockAfter(lines, start, indent) {
   const block = [];
   for (let i = start + 1; i < lines.length; i++) {
@@ -38,11 +34,8 @@ function blockAfter(lines, start, indent) {
 }
 
 /**
- * YAML-блок с полями запроса из markdown-страницы модели.
- * Market API (api: jobs) вкладывает поля в объект input; выделенные API
- * (veo/suno/flux/runway/gpt4o) кладут их плоско в requestBody — для них
- * возвращается схема тела целиком (служебные model/callBackUrl отсеиваются позже).
- * Возвращает текст блока (без строки «input:») или null.
+ * Extracts YAML block containing input fields from markdown page.
+ * Returns block text or null.
  */
 export function extractInputBlock(markdown) {
   const lines = String(markdown || "").split("\n");
@@ -63,7 +56,6 @@ export function extractInputBlock(markdown) {
   return null;
 }
 
-/** Многострочное описание YAML (|-, >-, обычный скаляр) → одна строка. */
 function joinDescription(lines) {
   return lines
     .map((line) => line.trim())
@@ -114,8 +106,8 @@ function parseFieldBody(bodyLines) {
 }
 
 /**
- * Поля input из YAML-блока.
- * Возвращает [{ name, type, required, description, enum, default, constraints }].
+ * Input fields from YAML block.
+ * Returns [{ name, type, required, description, enum, default, constraints }].
  */
 export function parseInputFields(block) {
   if (!block) return [];
@@ -125,7 +117,6 @@ export function parseInputFields(block) {
   if (propIdx === -1) return [];
   const propIndent = indentOf(lines[propIdx]);
 
-  // required-список самого объекта input (на одном уровне с properties)
   const required = new Set();
   for (let i = 0; i < lines.length; i++) {
     if (indentOf(lines[i]) !== propIndent || !/^\s*required:\s*$/.test(lines[i])) continue;
@@ -161,13 +152,12 @@ export function parseInputFields(block) {
   return fields;
 }
 
-/** markdown страницы модели → { fields, block }. */
+/** Markdown page → { fields, block }. */
 export function extractInputSchema(markdown) {
   const block = extractInputBlock(markdown);
   return { fields: parseInputFields(block), block };
 }
 
-// Кандидаты в поле промпта и поле изображения — по убыванию приоритета.
 const PROMPT_FIELDS = ["prompt", "text", "input_text", "description"];
 const IMAGE_FIELDS = [
   "image_urls",
@@ -182,13 +172,10 @@ const IMAGE_FIELDS = [
   "reference_image_urls",
   "image",
 ];
-// Поля конверта запроса: CLI подставляет их сам или не использует.
 const IGNORED_REQUIRED = new Set(["callBackUrl", "callbackUrl"]);
 
 /**
- * Метаданные модели, выведенные из её схемы: где промпт, где картинка,
- * что обязательно и какие обязательные поля имеют значение по умолчанию.
- * Благодаря этому новая модель каталога работает без обновления CLI.
+ * Derives model metadata from schema: prompt_field, image_field, required fields, defaults.
  */
 export function deriveModelMeta(fields) {
   const byName = new Map(fields.map((f) => [f.name, f]));
@@ -214,7 +201,6 @@ export function deriveModelMeta(fields) {
   };
 }
 
-/** Значение default из YAML-строки → тип поля (boolean/number/string). */
 function coerceDefault(field) {
   const raw = String(field.default);
   if (field.type === "boolean") return raw === "true";
@@ -225,7 +211,7 @@ function coerceDefault(field) {
   return raw;
 }
 
-/** Однострочное описание поля для человекочитаемого вывода. */
+/** One-line field description for human-readable output. */
 export function formatField(field) {
   const parts = [];
   if (field.type) parts.push(field.type === "array" && field.constraints.items
@@ -235,9 +221,9 @@ export function formatField(field) {
   const { minimum, maximum, minLength, maxLength, maxItems } = field.constraints;
   if (minimum !== undefined || maximum !== undefined) parts.push(`${minimum ?? ""}..${maximum ?? ""}`);
   if (minLength !== undefined || maxLength !== undefined) {
-    parts.push(`длина ${minLength ?? ""}..${maxLength ?? ""}`);
+    parts.push(`length ${minLength ?? ""}..${maxLength ?? ""}`);
   }
-  if (maxItems !== undefined) parts.push(`до ${maxItems} шт`);
-  if (field.default !== null && field.default !== undefined) parts.push(`по умолч. ${field.default}`);
+  if (maxItems !== undefined) parts.push(`up to ${maxItems}`);
+  if (field.default !== null && field.default !== undefined) parts.push(`default ${field.default}`);
   return parts.join(", ");
 }

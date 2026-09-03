@@ -11,7 +11,6 @@ import {
 import { mergeModelMeta } from "../src/schema-cache.js";
 import { SEED_MODELS } from "../src/models.js";
 
-// Фрагмент market-страницы docs.kie.ai (Market API: поля внутри объекта input).
 const MARKET_PAGE = `
 # Some model
 
@@ -72,7 +71,6 @@ paths:
 \`\`\`
 `;
 
-// Выделенный API (veo/suno/flux): поля лежат плоско в requestBody.
 const DEDICATED_PAGE = `
 paths:
   /api/v1/veo/generate:
@@ -98,29 +96,28 @@ paths:
                   default: veo3
 `;
 
-// ------------------------------------------------------------------ парсинг
-test("extractInputBlock: находит объект input market-страницы", () => {
+// ------------------------------------------------------------------ parsing
+test("extractInputBlock: extracts input object from market page", () => {
   const block = extractInputBlock(MARKET_PAGE);
   assert.ok(block);
   assert.match(block, /properties:/);
   assert.match(block, /generate_audio:/);
-  // model/callBackUrl лежат выше input — в блок не попадают
   assert.doesNotMatch(block, /callBackUrl/);
 });
 
-test("extractInputBlock: fallback на requestBody для выделенных API", () => {
+test("extractInputBlock: fallback to requestBody for dedicated APIs", () => {
   const block = extractInputBlock(DEDICATED_PAGE);
   assert.ok(block);
   assert.match(block, /imageUrls:/);
 });
 
-test("extractInputBlock: нет схемы — null", () => {
-  assert.equal(extractInputBlock("# Просто текст без схемы"), null);
+test("extractInputBlock: no schema returns null", () => {
+  assert.equal(extractInputBlock("# Just text without schema"), null);
   assert.equal(extractInputBlock(""), null);
   assert.equal(extractInputBlock(null), null);
 });
 
-test("parseInputFields: имена, типы, enum, default, required", () => {
+test("parseInputFields: names, types, enum, default, required", () => {
   const fields = parseInputFields(extractInputBlock(MARKET_PAGE));
   assert.deepEqual(
     fields.map((f) => f.name),
@@ -146,32 +143,31 @@ test("parseInputFields: имена, типы, enum, default, required", () => {
   assert.equal(byName.generate_audio.default, "true");
 });
 
-test("parseInputFields: пустой вход — пустой список", () => {
+test("parseInputFields: empty input returns empty array", () => {
   assert.deepEqual(parseInputFields(null), []);
-  assert.deepEqual(parseInputFields("нет properties"), []);
+  assert.deepEqual(parseInputFields("no properties"), []);
 });
 
-test("formatField: человекочитаемая сводка", () => {
+test("formatField: formatted summary string", () => {
   const fields = parseInputFields(extractInputBlock(MARKET_PAGE));
   const aspect = fields.find((f) => f.name === "aspect_ratio");
   assert.match(formatField(aspect), /16:9 \| 9:16/);
-  assert.match(formatField(aspect), /по умолч\. 16:9/);
+  assert.match(formatField(aspect), /default 16:9/);
   assert.match(formatField(fields.find((f) => f.name === "image_urls")), /array<string>/);
 });
 
-// ------------------------------------------------------------------ метаданные
-test("deriveModelMeta: поля промпта/картинки, required и дефолты из схемы", () => {
+// ------------------------------------------------------------------ metadata
+test("deriveModelMeta: prompt/image fields, required and defaults from schema", () => {
   const { fields } = extractInputSchema(MARKET_PAGE);
   const meta = deriveModelMeta(fields);
   assert.equal(meta.prompt_field, "prompt");
   assert.equal(meta.image_field, "image_urls");
   assert.equal(meta.image_list, true);
   assert.deepEqual(meta.required, ["prompt", "image_urls", "aspect_ratio"]);
-  // дефолт подставляется только для обязательного поля
   assert.deepEqual(meta.defaults, { aspect_ratio: "16:9" });
 });
 
-test("deriveModelMeta: типы дефолтов приводятся (boolean/number)", () => {
+test("deriveModelMeta: default types coerced (boolean/number)", () => {
   const meta = deriveModelMeta([
     { name: "duration", type: "integer", required: true, default: "6", enum: [], constraints: {} },
     { name: "sound", type: "boolean", required: true, default: "false", enum: [], constraints: {} },
@@ -179,7 +175,7 @@ test("deriveModelMeta: типы дефолтов приводятся (boolean/n
   assert.deepEqual(meta.defaults, { duration: 6, sound: false });
 });
 
-test("deriveModelMeta: callBackUrl не считается обязательным полем модели", () => {
+test("deriveModelMeta: callBackUrl not treated as required model field", () => {
   const meta = deriveModelMeta([
     { name: "prompt", type: "string", required: true, default: null, enum: [], constraints: {} },
     { name: "callBackUrl", type: "string", required: true, default: null, enum: [], constraints: {} },
@@ -187,7 +183,7 @@ test("deriveModelMeta: callBackUrl не считается обязательн�
   assert.deepEqual(meta.required, ["prompt"]);
 });
 
-test("deriveModelMeta: альтернативные имена полей (text / first_frame_url)", () => {
+test("deriveModelMeta: alternative field names (text / first_frame_url)", () => {
   const meta = deriveModelMeta([
     { name: "text", type: "string", required: true, default: null, enum: [], constraints: {} },
     { name: "first_frame_url", type: "string", required: false, default: null, enum: [], constraints: {} },
@@ -197,8 +193,8 @@ test("deriveModelMeta: альтернативные имена полей (text 
   assert.equal(meta.image_list, false);
 });
 
-// ------------------------------------------------------------------ слияние
-test("mergeModelMeta: у динамической модели схема — источник истины", () => {
+// ------------------------------------------------------------------ merge
+test("mergeModelMeta: for dynamic model schema is source of truth", () => {
   const dynamic = {
     category: "video", api: "jobs", prompt_field: "prompt",
     image_field: null, image_list: false, required: [], dynamic: true,
@@ -216,7 +212,7 @@ test("mergeModelMeta: у динамической модели схема — и
   assert.deepEqual(merged.defaults, { resolution: "720p" });
 });
 
-test("mergeModelMeta: у seed-модели выверенные метаданные приоритетны", () => {
+test("mergeModelMeta: for seed model verified metadata takes precedence", () => {
   const seed = { ...SEED_MODELS["kling-2.6/image-to-video"] };
   const merged = mergeModelMeta(seed, {
     prompt_field: "text",
@@ -229,11 +225,10 @@ test("mergeModelMeta: у seed-модели выверенные метаданн
   assert.equal(merged.prompt_field, "prompt");
   assert.equal(merged.image_field, "image_urls");
   assert.deepEqual(merged.required, seed.required);
-  // дефолты из схемы дополняют, но seed-значения главнее
   assert.equal(merged.defaults.duration, "5");
 });
 
-test("mergeModelMeta: без схемы модель не меняется", () => {
+test("mergeModelMeta: without schema model is unchanged", () => {
   const seed = { ...SEED_MODELS["google/nano-banana"] };
   assert.deepEqual(mergeModelMeta(seed, null), seed);
 });
