@@ -1,0 +1,32 @@
+🚀 Excited to launch `kie-media-cli` — a lightweight, zero-dependency CLI tool for generating AI photos, videos, and audio!
+
+Whether you need rapid text-to-image, high-quality image-to-video animations (like Kling V3 Turbo, Wan 2.6, or Veo 3), or AI audio synthesis (Suno), `kie-media-cli` unifies all KIE platform (kie.ai) models under a single, intuitive `kie` command.
+
+✨ Key Features:
+• Zero runtime dependencies (built natively on Node.js >= 18)
+• Unified interface for 70+ AI models across Image, Video, and Audio categories
+• Live model catalog discovery, fuzzy search, and automatic schema validation
+• Native AI Agent Skill integration (`kie-generate`) for seamless pairing with AI coding agents (Antigravity, Claude, Cursor)
+• Automatic local file handling and upload for Image-to-Video and Image-to-Image tasks
+
+⚙️ Quick Setup:
+To get started:
+1️⃣ Install & run interactive setup:
+   npx -y kie-media-cli setup
+
+2️⃣ Get your API key from KIE (https://kie.ai/api-key) and set it up:
+   kie config --set-key YOUR_API_KEY
+   # or export KIE_API_KEY=YOUR_API_KEY
+
+3️⃣ Connect to AI Agents by adding the agent skill:
+   npx -y skills add MIt9/kie-skills/kie-generate
+
+📌 Links & Resources:
+• npm Package: https://www.npmjs.com/package/kie-media-cli
+• GitHub Repository: https://github.com/MIt9/kie-media-cli
+• Agent Skill: MIt9/kie-skills/kie-generate
+• KIE API Keys & Docs: https://kie.ai/api-key
+
+Give it a try and streamline your generative AI media workflows directly from your terminal or AI coding agent! 🎨🎬🎵
+
+#DevTools #CLI #GenerativeAI #AIEngineering #NodeJS #OpenSource #KieAI #AIAgents
