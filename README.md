@@ -8,6 +8,8 @@
 
 # KIE Media CLI (`kie`)
 
+> **Generate image/video/audio via KIE API from Claude or Cursor** — unified CLI for kie.ai (generate/model/workflow, cost, history).
+
 [![npm](https://img.shields.io/npm/v/kie-media-cli.svg)](https://www.npmjs.com/package/kie-media-cli)
 [![node](https://img.shields.io/node/v/kie-media-cli.svg)](https://nodejs.org)
 [![license](https://img.shields.io/npm/l/kie-media-cli.svg)](LICENSE)
